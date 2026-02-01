@@ -15,16 +15,17 @@ export async function executeSpreadTrade({
   onSignal
 }) {
   // 1️⃣ BUY
-  const buy = await placeOrder({
-    tokenID: outcome.assetId,
-    price: buyPrice,
-    size,
-    side: "BUY",
-    orderPriceMinTickSize: opp.orderPriceMinTickSize,
-    negRisk: opp.negRisk,
-    OrderType: OrderType.GTC,
-    oppId: opp.id
-  });
+  const buy = {};
+  // const buy = await placeOrder(client, {
+  //   tokenID: outcome.assetId,
+  //   price: buyPrice,
+  //   size,
+  //   side: "BUY",
+  //   orderPriceMinTickSize: opp.orderPriceMinTickSize,
+  //   negRisk: opp.negRisk,
+  //   OrderType: OrderType.GTC,
+  //   oppId: opp.id
+  // });
 
   // console.log(`executeSpreadTrade -> BUY: `);
   // console.log(buy);
@@ -66,42 +67,42 @@ export async function executeSpreadTrade({
   // console.log(sell, sell.orderID, opp.id));
   // if (!sell?.orderID) return { ok: false, stage: "sell_failed" };
 
-  let sell;
-  let attempt = 0;
-  const maxAttempts = 15;
+  // let sell;
+  // let attempt = 0;
+  // const maxAttempts = 15;
 
-  while (attempt < maxAttempts) {
-    attempt++;
+  // while (attempt < maxAttempts) {
+  //   attempt++;
 
-    console.log(`🧪 SELL attempt ${attempt}`);
-    console.log('tokenID: ', outcome.assetId, 'price: ', sellPrice )
-    sell = await placeOrderSell({
-      tokenID: outcome.assetId,
-      size: balance,
-      side: "SELL",
-      price: sellPrice,
-      orderPriceMinTickSize: opp.orderPriceMinTickSize,
-      negRisk: opp.negRisk
-    });
-    console.log(sell);
-    console.log(`executeSpreadTrade -> SELL: `);
-    console.log(sell, sell.orderID, opp.id);
-    console.log("SELL response:", sell);
+  //   console.log(`🧪 SELL attempt ${attempt}`);
+  //   console.log('tokenID: ', outcome.assetId, 'price: ', sellPrice )
+  //   sell = await placeOrderSell({
+  //     tokenID: outcome.assetId,
+  //     size: balance,
+  //     side: "SELL",
+  //     price: sellPrice,
+  //     orderPriceMinTickSize: opp.orderPriceMinTickSize,
+  //     negRisk: opp.negRisk
+  //   });
+  //   console.log(sell);
+  //   console.log(`executeSpreadTrade -> SELL: `);
+  //   console.log(sell, sell.orderID, opp.id);
+  //   console.log("SELL response:", sell);
 
-    if (sell?.orderID) break; // success
+  //   if (sell?.orderID) break; // success
 
-    // If balance not yet settled — wait before retry
-    if (sell?.error?.includes("not enough balance")) {
-      console.log("⏳ Waiting for settlement...");
-      await new Promise(r => setTimeout(r, 1200)); // 1.2s backoff
-    } else {
-      break; // some other fatal error
-    }
-  }
+  //   // If balance not yet settled — wait before retry
+  //   if (sell?.error?.includes("not enough balance")) {
+  //     console.log("⏳ Waiting for settlement...");
+  //     await new Promise(r => setTimeout(r, 1200)); // 1.2s backoff
+  //   } else {
+  //     break; // some other fatal error
+  //   }
+  // }
 
-  if (!sell?.orderID) {
-    return { ok:false, stage:"sell_failed_after_retries" };
-  }
+  // if (!sell?.orderID) {
+  //   return { ok:false, stage:"sell_failed_after_retries" };
+  // }
 
   // timeoutMs = 150000; // 2.5 минуты
   // const sellStatus = await waitForOrderMatch(client, sell.orderID, timeoutMs);
@@ -169,4 +170,49 @@ async function waitForBalance(сlient, tokenId, opp, onSignal, orderID, timeoutM
   }
 
   throw new Error("Balance not settled in time");
+}
+
+export async function executeSpreadTradeArb( 
+  placeOrder,
+  client,
+  outcome,
+  oppositeOutcome,
+  opp,
+  buyPrice,
+  buyPrice2,
+  size,
+  onSignal){
+    console.log(placeOrder);
+    console.log(client);
+    console.log(outcome);
+    console.log(oppositeOutcome);
+  // 1️⃣ BUY first outcome
+  // const buy1 = await placeOrder({
+  //   tokenID: outcome.assetId,
+  //   price: buyPrice,
+  //   size,
+  //   side: "BUY",
+  //   orderPriceMinTickSize: opp.orderPriceMinTickSize,
+  //   negRisk: opp.negRisk,
+  //   OrderType: OrderType.GTC,
+  //   oppId: opp.id
+  // });
+  // if (!buy1?.orderID) return { ok: false, stage: "buy_failed" };
+  // let buyStatus;
+  // let timeoutMs = 6000;
+  // buyStatus = await waitForOrderMatch(client, buy1.orderID, timeoutMs);
+  // if (buyStatus !== "matched") {
+  //   return { ok: false, stage: "buy_not_filled (live/cancelled)" };
+  // }
+  // console.log(oppositeOutcome);
+  // const buy2 = await placeOrder({
+  //   tokenID: oppositeOutcome.assetId,
+  //   price: buyPrice2,
+  //   size,
+  //   side: "BUY",
+  //   orderPriceMinTickSize: opp.orderPriceMinTickSize,
+  //   negRisk: opp.negRisk,
+  //   OrderType: OrderType.GTC,
+  //   oppId: opp.id
+  // });
 }

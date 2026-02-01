@@ -16,7 +16,7 @@ import { OrderType, Side } from "@polymarket/clob-client";
 
 // BUY
 export async function placeOrder(clobClient, orderParams) {
-  
+  console.log(orderParams);  
   try {
 
     const { tokenID, price, size, side, orderPriceMinTickSize, negRisk, orderType, oppId } = orderParams;

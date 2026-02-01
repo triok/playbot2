@@ -1,4 +1,4 @@
-import { isCryptoMarket, CRYPTO_KEYWORDS } from "./utils.js"; 
+import { isCryptoMarket, CRYPTO_KEYWORDS, formatMoscowDateTime } from "./utils.js"; 
 
 export async function getOpportunities({
   maxTimeHours = 1
@@ -48,7 +48,7 @@ export async function getOpportunities({
 
   for (const event of allEvents) {
     if (!event.markets) continue;
-
+    if (event.ended) continue;
     for (const market of event.markets) {
       
       if (!market.outcomePrices || !market.outcomes) continue;
@@ -90,8 +90,27 @@ export async function getOpportunities({
       );
 
       const foundKeyword = CRYPTO_KEYWORDS.find(keyword =>
-        market.question.toLowerCase().includes(keyword.toLowerCase())
+        event.title.toLowerCase().includes(keyword.toLowerCase())
       );  
+      
+      let marketType = '';
+      if (event.slug.includes('-15m-')) {
+        marketType = '15m';
+      }
+
+      let startDate = '';
+      if(foundKeyword == 'lol' || foundKeyword == 'dota' || foundKeyword == 'Counter-Strike' || foundKeyword == 'honor' || foundKeyword == 'valorant'){
+        startDate = formatMoscowDateTime(market.gameStartTime);
+        if(!market.groupItemTitle.toLowerCase().includes('winner') && !market.groupItemTitle.toLowerCase().includes('moneyline')){
+          continue;
+        }
+      } else {
+        const thisMarketmaxTimeHours = 1;
+        const thisMarketfuture = new Date(now.getTime() + thisMarketmaxTimeHours * 60 * 60 * 1000); 
+        const thisMarketendDate = new Date(market.endDate || event.endDate);
+        if (thisMarketendDate <= now || thisMarketendDate > thisMarketfuture) continue;        
+
+      } 
 
       const opp = {
         id: market.id,
@@ -110,9 +129,15 @@ export async function getOpportunities({
         volume: market.volume,
         slug: event.slug,
         negRisk: market.negRisk,
-        keyword: foundKeyword
+        keyword: foundKeyword,
+        marketType: marketType,
+        live: event.live,
+        startTime: startDate
       };
-      
+      // if(event.live){
+      //   console.log(event);
+      // }
+      // console.log(opp);
       // 🧠 ФИЛЬТР КРИПТО
       if (!isCryptoMarket(opp)) {
         continue;   // ❌ НЕ крипта — пропускаем
@@ -124,11 +149,11 @@ export async function getOpportunities({
 
     console.log(`✅ Found ${opportunities.length} opportunities`);
     // if (opportunities.length > 0) {
-    //   // return [opportunities[0]];
-    //   return opportunities.slice(0, 2);
+      // return [opportunities[0]];
+      return opportunities.slice(0, 2);
     // }
     // return [];
-    return opportunities;
+    // return opportunities;
 }
 
 function getTimeDifference(endDate) {

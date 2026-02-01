@@ -86,7 +86,7 @@ export default function App() {
     if (isInitializedRef.current) return;
     isInitializedRef.current = true;  
     const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${protocol}://${location.hostname}:3001`);   
+    const ws = new WebSocket(`${protocol}://${location.hostname}:3002`);   
     // const ws = new WebSocket('ws://192.168.1.168:3001');
     wsRef.current = ws;
   
@@ -298,217 +298,196 @@ export default function App() {
     }
   };
 
-// Подсчёт статистики по всем рынкам
-// const stats = useMemo(() => {
-  
-//   let win1 = 0, loss1 = 0;
-//   let win2 = 0, loss2 = 0;
-//   let win3 = 0, loss3 = 0;
-//   let outcome1DoneCount = 0;
-//   let outcome1SoldCount = 0;
+  const stats = useMemo(() => {
+    let win1 = 0, loss1 = 0;
+    let win2 = 0, loss2 = 0;
+    let win3 = 0, loss3 = 0;
+    let outcome1DoneCount = 0;
+    let outcome1SoldCount = 0;
+    let arb46Win = 0;
+    let arb46Loss = 0;
 
-//   const byCategory = {};
-  
-// // --- Анализ по времени ОКОНЧАНИЯ (rawEndDate) ---
-// const endTimeBuckets: Record<string, { 
-//   total: number; 
-//   win: number; 
-//   loss: number; 
-//   byCategory: Record<string, { win: number; loss: number }> 
-// }> = {};
+    const byCategory = {};
+    // --- Статистика для арбитража 0.46 ---
+    Object.values(marketStates).forEach(state => {
+      const hasOutcome1 = state.outcome_1_46 !== undefined;
+      const hasOutcome2 = state.outcome_2_46 !== undefined;
 
-// // Нужен список всех opp для сопоставления id → rawEndDate
-// // Получим его из текущих opportunities
-// const oppMap = new Map<string, Opportunity>();
-// opportunities.forEach(opp => {
-//   oppMap.set(opp.id, opp);
-// });
-
-// Object.entries(marketStates).forEach(([marketId, state]) => {
-//   if (state.botResult1 === undefined || !state.resolved) return;
-
-//   const opp = oppMap.get(marketId);
-//   if (!opp || !opp.rawEndDate) return;
-
-//   const endTime = new Date(opp.rawEndDate).getTime();
-//   if (!endTime) return;
-
-//   // Группируем по 15-минутным интервалам
-//   const intervalMs = 15 * 60 * 1000;
-//   const bucketKey = Math.floor(endTime / intervalMs) * intervalMs;
-//   const bucketTime = new Date(bucketKey).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-//   if (!endTimeBuckets[bucketTime]) {
-//     endTimeBuckets[bucketTime] = {
-//       total: 0,
-//       win: 0,
-//       loss: 0,
-//       byCategory: {}
-//     };
-//   }
-
-//   const bucket = endTimeBuckets[bucketTime];
-//   const category = state.resolvedKeyword || 'other';
-//   const isWin = state.botResult1;
-
-//   bucket.total++;
-//   if (isWin) bucket.win++; else bucket.loss++;
-
-//   if (!bucket.byCategory[category]) {
-//     bucket.byCategory[category] = { win: 0, loss: 0 };
-//   }
-//   if (isWin) {
-//     bucket.byCategory[category].win++;
-//   } else {
-//     bucket.byCategory[category].loss++;
-//   }
-// });
-
-// // Сортируем по времени (ранние — сверху)
-// const sortedEndTimeBuckets = Object.entries(endTimeBuckets)
-//   .sort(([a], [b]) => new Date(a).getTime() - new Date(b).getTime());
-
-//   Object.values(marketStates).forEach(state => {
-//     if (state.botResult1 !== undefined) {
-//       if (state.botResult1) win1++; else loss1++;
-//     }
-//     if (state.botResult2 !== undefined) {
-//       if (state.botResult2) win2++; else loss2++;
-//     }    
-//     if (state.botResult3 !== undefined) {
-//       if (state.botResult3) win3++; else loss3++;
-//     }
-
-//     if ('outcome1_done' in state) {
-//       if (!state.botResult1) {
-//         outcome1DoneCount++;
-//       }
-      
-//     }
-//     if ('outcome1_sold' in state) {
-//       outcome1SoldCount++;
-//     }
-//     // --- Статистика по категориям (только для botResult1) ---
-//     const category = state.resolvedKeyword || 'unknown';
-//     if (!byCategory[category]) {
-//       byCategory[category] = { win1: 0, loss1: 0, total: 0 };
-//     }
-
-//     if (state.botResult1 !== undefined) {
-//       byCategory[category].total++;
-//       if (state.botResult1) {
-//         byCategory[category].win1++;
-//       } else {
-//         byCategory[category].loss1++;
-//       }
-//     }    
-//   });
-
-//     return { win1, loss1, win2, loss2, win3, loss3, outcome1DoneCount, outcome1SoldCount, byCategory };
-// }, [marketStates]);
-const stats = useMemo(() => {
-  let win1 = 0, loss1 = 0;
-  let win2 = 0, loss2 = 0;
-  let win3 = 0, loss3 = 0;
-  let outcome1DoneCount = 0;
-  let outcome1SoldCount = 0;
-
-  const byCategory = {};
-
-  // --- Анализ по времени ОКОНЧАНИЯ (rawEndDate) ---
-  const endTimeBuckets = {};
-  const oppMap = new Map<string, Opportunity>();
-  opportunities.forEach(opp => {
-    oppMap.set(opp.id, opp);
-  });
-
-  Object.entries(marketStates).forEach(([marketId, state]) => {
-    if (state.botResult1 === undefined || !state.resolved) return;
-
-    const opp = oppMap.get(marketId);
-    if (!opp || !opp.rawEndDate) return;
-
-    const endTime = new Date(opp.rawEndDate).getTime();
-    if (!endTime) return;
-
-    const intervalMs = 15 * 60 * 1000;
-    const bucketKey = Math.floor(endTime / intervalMs) * intervalMs;
-    const bucketTime = new Date(bucketKey).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    if (!endTimeBuckets[bucketTime]) {
-      endTimeBuckets[bucketTime] = {
-        total: 0,
-        win: 0,
-        loss: 0,
-        byCategory: {}
-      };
-    }
-
-    const bucket = endTimeBuckets[bucketTime];
-    const category = state.resolvedKeyword || 'other';
-    const isWin = state.botResult1;
-
-    bucket.total++;
-    if (isWin) bucket.win++; else bucket.loss++;
-
-    if (!bucket.byCategory[category]) {
-      bucket.byCategory[category] = { win: 0, loss: 0 };
-    }
-    if (isWin) {
-      bucket.byCategory[category].win++;
-    } else {
-      bucket.byCategory[category].loss++;
-    }
-  });
-
-  const sortedEndTimeBuckets = Object.entries(endTimeBuckets)
-    .sort(([a], [b]) => new Date(a).getTime() - new Date(b).getTime());
-
-  // --- Общая статистика ---
-  Object.values(marketStates).forEach(state => {
-    if (state.botResult1 !== undefined) {
-      if (state.botResult1) win1++; else loss1++;
-    }
-    if (state.botResult2 !== undefined) {
-      if (state.botResult2) win2++; else loss2++;
-    }    
-    if (state.botResult3 !== undefined) {
-      if (state.botResult3) win3++; else loss3++;
-    }
-
-    if ('outcome1_done' in state) {
-      if (!state.botResult1) {
-        outcome1DoneCount++;
+      if (hasOutcome1 || hasOutcome2) {
+        if (hasOutcome1 && hasOutcome2) {
+          arb46Win++;
+        } else {
+          arb46Loss++;
+        }
       }
-    }
-    if ('outcome1_sold' in state) {
-      outcome1SoldCount++;
-    }
+    });
 
-    const category = state.resolvedKeyword || 'unknown';
-    if (!byCategory[category]) {
-      byCategory[category] = { win1: 0, loss1: 0, total: 0 };
-    }
-    if (state.botResult1 !== undefined) {
-      byCategory[category].total++;
-      if (state.botResult1) {
-        byCategory[category].win1++;
+    // --- Статистика ARB 0.46 по категориям ---
+    const arb46ByCategory = {};
+
+    Object.entries(marketStates).forEach(([marketId, state]) => {
+      const hasOutcome1 = state.outcome_1_46 !== undefined;
+      const hasOutcome2 = state.outcome_2_46 !== undefined;
+
+      // Пропускаем, если не участвовали в арбитраже 0.46
+      if (!hasOutcome1 && !hasOutcome2) return;
+
+      const category = state.resolvedKeyword || 'other';
+      if (!arb46ByCategory[category]) {
+        arb46ByCategory[category] = { win: 0, loss: 0 };
+      }
+
+      if (hasOutcome1 && hasOutcome2) {
+        arb46ByCategory[category].win++;
       } else {
-        byCategory[category].loss1++;
+        arb46ByCategory[category].loss++;
       }
-    }    
-  });
+    });  
 
-  return { 
-    win1, loss1, 
-    win2, loss2, 
-    win3, loss3, 
-    outcome1DoneCount, 
-    outcome1SoldCount, 
-    byCategory,
-    sortedEndTimeBuckets 
+    // --- Анализ по времени ОКОНЧАНИЯ (rawEndDate) ---
+    const endTimeBuckets = {};
+    const oppMap = new Map<string, Opportunity>();
+    opportunities.forEach(opp => {
+      oppMap.set(opp.id, opp);
+    });
+
+    Object.entries(marketStates).forEach(([marketId, state]) => {
+      if (state.botResult1 === undefined || !state.resolved) return;
+
+      const opp = oppMap.get(marketId);
+      if (!opp || !opp.rawEndDate) return;
+
+      const endTime = new Date(opp.rawEndDate).getTime();
+      if (!endTime) return;
+
+      const intervalMs = 15 * 60 * 1000;
+      const bucketKey = Math.floor(endTime / intervalMs) * intervalMs;
+      const bucketTime = new Date(bucketKey).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      if (!endTimeBuckets[bucketTime]) {
+        endTimeBuckets[bucketTime] = {
+          total: 0,
+          win: 0,
+          loss: 0,
+          byCategory: {}
+        };
+      }
+
+      const bucket = endTimeBuckets[bucketTime];
+      const category = state.resolvedKeyword || 'other';
+      const isWin = state.botResult1;
+
+      bucket.total++;
+      if (isWin) bucket.win++; else bucket.loss++;
+
+      if (!bucket.byCategory[category]) {
+        bucket.byCategory[category] = { win: 0, loss: 0 };
+      }
+      if (isWin) {
+        bucket.byCategory[category].win++;
+      } else {
+        bucket.byCategory[category].loss++;
+      }
+    });
+
+    const sortedEndTimeBuckets = Object.entries(endTimeBuckets)
+      .sort(([a], [b]) => new Date(a).getTime() - new Date(b).getTime());
+
+    // --- Общая статистика ---
+    Object.values(marketStates).forEach(state => {
+      if (state.botResult1 !== undefined) {
+        if (state.botResult1) win1++; else loss1++;
+      }
+      if (state.botResult2 !== undefined) {
+        if (state.botResult2) win2++; else loss2++;
+      }    
+      if (state.botResult3 !== undefined) {
+        if (state.botResult3) win3++; else loss3++;
+      }
+
+      if ('outcome1_done' in state) {
+        if (!state.botResult1) {
+          outcome1DoneCount++;
+        }
+      }
+      if ('outcome1_sold' in state) {
+        outcome1SoldCount++;
+      }
+
+      const category = state.resolvedKeyword || 'unknown';
+      if (!byCategory[category]) {
+        byCategory[category] = { win1: 0, loss1: 0, total: 0 };
+      }
+      if (state.botResult1 !== undefined) {
+        byCategory[category].total++;
+        if (state.botResult1) {
+          byCategory[category].win1++;
+        } else {
+          byCategory[category].loss1++;
+        }
+      }    
+    });
+
+    return { 
+      win1, loss1, 
+      win2, loss2, 
+      win3, loss3, 
+      outcome1DoneCount, 
+      outcome1SoldCount, 
+      byCategory,
+      sortedEndTimeBuckets,
+      arb46Win, 
+      arb46Loss,
+      arb46ByCategory    
+    };
+  }, [marketStates, opportunities]);
+
+  const handlePlaceOrder = async (opp, outcome) => {
+    try {
+      const response = await fetch('/api/place-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tokenID: outcome.assetId,
+          price: outcome.price,
+          size: 5, // или спросить у пользователя
+          side: "BUY",
+          conditionId: opp.conditionId
+        })
+      });
+  
+      const data = await response.json();
+      if (data.success) {
+        addLog(`✅ Order placed: ${outcome.name} @ ${(outcome.price * 100).toFixed(1)}¢`, 'success');
+      } else {
+        addLog(`❌ Order failed: ${data.error}`, 'error');
+      }
+    } catch (err) {
+      addLog('❌ Network error placing order', 'error');
+    }
   };
-}, [marketStates, opportunities]); // ⚠️ не забудь добавить `opportunities` в зависимости!
+
+  const blockEvent = async (conditionId) => {
+    try {
+      const response = await fetch('/api/block-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conditionId })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        addLog(`✅ Event blocked: ${conditionId}`, 'warning');
+        
+        // Опционально: удали из локального состояния
+        setOpportunities(prev => prev.filter(opp => opp.conditionId !== conditionId));
+      } else {
+        addLog(`❌ Failed to block event: ${data.message}`, 'error');
+      }
+    } catch (err) {
+      addLog('❌ Network error while blocking event', 'error');
+    }
+  };
 // ==========================================
 
 
@@ -768,6 +747,26 @@ const stats = useMemo(() => {
                   <span className="text-emerald-400">✅ Outcome3 Wins:</span> {stats.win3} | 
                   <span className="text-red-400"> ❌ Losses:</span> {stats.loss3}
                 </div>
+                <div>
+                  <span className="text-emerald-400">✅ ARB 0.46 Wins:</span> {stats.arb46Win} | 
+                  <span className="text-red-400"> ❌ Losses:</span> {stats.arb46Loss}
+                </div>  
+                {/* --- ARB 0.46 Performance by Category --- */}
+                <div className="mt-4 text-xs font-mono">
+                  <div className="font-bold mb-1">📊 ARB 0.46 by Category:</div>
+                  {Object.entries(stats.arb46ByCategory).map(([category, data]) => (
+                    <div key={category} className="flex justify-between">
+                      <span className="text-slate-300">{category}:</span>
+                      <span>
+                        <span className="text-emerald-400">✅{data.win}</span> / 
+                        <span className="text-red-400"> ❌{data.loss}</span>
+                        {data.win + data.loss > 0 && (
+                          <span className="text-slate-500 ml-1">({Math.round((data.win / (data.win + data.loss)) * 100)}%)</span>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>                              
                 <div className="text-slate-500">
                   Total tracked markets: {Object.keys(marketStates).length}
                 </div>
@@ -912,6 +911,12 @@ const stats = useMemo(() => {
                     <div className="flex items-start gap-2">
                       <h3 className="font-medium relative text-slate-200 text-sm leading-snug max-w-[70%] group-hover:text-indigo-300 transition-colors">
                         <span className="text-slate-500 mr-1">#{opp.order}</span>
+                        {opp.live && (
+                          <span className="text-red-500 font-bold mr-1">LIVE</span>
+                        )}   
+                        <span className="text-slate-400 ml-2">
+                          {opp.startTime}{" "}
+                        </span>                                              
                         {opp.title} | NegRisk:{" "}
                         <span className={opp.negRisk ? "text-yellow-400" : "text-green-400"}>
                           {opp.negRisk ? 1 : 0}
@@ -972,12 +977,16 @@ const stats = useMemo(() => {
                           <span className="block text-xs text-slate-500 uppercase" title={o.assetId}>
                             {o.name} {o.name === opp.bestOutcome ? "⭐" : ""}
                           </span>
-                          <span className={`font-mono font-bold text-lg ${
-                            o.name === opp.bestOutcome ? "text-emerald-400" : "text-white"
-                          }`}>
+                          {/* Кликабельная кнопка вместо span */}
+                          <button
+                            onClick={() => handlePlaceOrder(opp, o)}
+                            className={`font-mono font-bold text-lg w-full text-left py-1 rounded hover:bg-slate-700 transition ${
+                              o.name === opp.bestOutcome ? "text-emerald-400" : "text-white"
+                            }`}
+                            title={`Click to buy ${o.name} @ ${(o.price * 100).toFixed(1)}¢`}
+                          >
                             {(o.price * 100).toFixed(1)}¢
-                          </span>
-                  
+                          </button>
                         </div>
                       ))}
                       <a 

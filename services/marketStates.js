@@ -31,6 +31,6 @@ export function updateMarketState(marketId, updates) {
       newState.botResult3 = newState.outcome3.value === newState.resolved;
     } 
     // Сохраняем обновлённое состояние
-    console.log(marketId, newState)
+    // console.log(marketId, newState)
     marketStates.set(marketId, newState);
   }

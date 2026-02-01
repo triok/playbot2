@@ -49,6 +49,9 @@ export interface Opportunity {
   negRisk: boolean;
   order?: number;
   keyword?: string; 
+  marketType?: string; 
+  live: boolean;
+  startDate: string;
 }
 
 export interface LogEntry {

@@ -14,14 +14,14 @@ import { updateMarketState } from './marketStates.js';
  * @param {Function} detectAndLockAutoBid - функция бота для проверки цен
  * @returns {ServerPolymarketWebsocket} - подключённый WS
  */
-
+export let polymarketWS = null; 
 
 export function initPolymarketWS({ getCachedOpportunities, broadcast, changedOpps }) {
 
   const initialOpportunities = getCachedOpportunities();
   const assetIds = initialOpportunities.flatMap(o => o.outcomes.map(out => out.assetId));
 
-  const polymarketWS = new ServerPolymarketWebsocket(assetIds, (msg) => {
+  polymarketWS = new ServerPolymarketWebsocket(assetIds, (msg) => {
     // 2. ✅ ВСЕГДА получаем АКТУАЛЬНЫЙ кэш
     const currentOpportunities = getCachedOpportunities();
     if (msg.event_type === "price_change") {
@@ -97,6 +97,23 @@ export function initPolymarketWS({ getCachedOpportunities, broadcast, changedOpp
         polymarketWS.unsubscribeAssets(assetIdsToUnsub);
       }          
     }
+    if (msg.event_type === "book") {
+      
+      const { asset_id, market } = msg;
+      const opp = getCachedOpportunities().find(o => o.conditionId === market);
+      if (opp) {
+        const now = Date.now();
+        const secondsLeft = Math.floor((new Date(opp.rawEndDate) - now) / 1000);      
+        if (secondsLeft <= 0) {
+          console.log(opp.slug);
+          console.log(msg);
+        }  
+      }
+      
+    }
+    // if(msg.event_type != "price_change" && msg.event_type != "market_resolved"){
+    //   console.log(msg);
+    // }
   });
   polymarketWS.connect();
   return polymarketWS;

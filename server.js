@@ -21,6 +21,7 @@ import { getOpportunities } from "./services/getOpportunities.js";
 import http from "http";
 import { WebSocketServer } from "ws";
 import { UserPolymarketWebsocket } from './services/UserPolymarketWebsocket.js';
+import { RtdsPolymarketWebsocket } from './services/rtdsPolymarketWebsocket.js';
 import { getClobClient } from "./services/clobClient.js";
 import { checkBalance, waitForBalance } from "./services/checkBalance.js";
 import { createBroadcaster } from './services/broadcast.js';
@@ -29,13 +30,14 @@ import { getMyProfits, startClaimScheduler } from "./services/getMyProfits.js";
 import { getRelayClient } from "./services/relayClient.js";
 import { initPolymarketWS } from "./services/polymarketHandler.js";
 import { createAutoBidBot } from "./services/autoBidBot.js";
-import { initCache, getCachedOpportunities, addOpportunities, checkMarket, syncResolvedMarkets } from './services/marketCache.js';
+import { initCache, getCachedOpportunities, addOpportunities, checkMarket, syncResolvedMarkets, cleanupResolvedButUnusedMarkets, removeMarketFromCache } from './services/marketCache.js';
 import { marketLogs } from './services/marketLogs.js';
 import { marketStates } from './services/marketStates.js';
 import { getAutoBidState, setAutoBidState } from './services/botState.js';
 import { placeOrder, placeOrderSell } from "./services/placeOrder.js";
-import { executeSpreadTrade } from "./services/executeSpreadTrade.js";
+import { executeSpreadTrade, executeSpreadTradeArb } from "./services/executeSpreadTrade.js";
 import { getOrder } from "./services/getOrder.js";
+import { getUserCurrentPositions, getUserActivity } from "./services/getUserInfo.js";
 import { getMarket } from "./services/getMarket.js";
 
 import { addOrder } from "./services/order_data.js";
@@ -50,7 +52,7 @@ dotenv.config();
 // 5. App + constants
 // --------------------
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 
 let client;
 let relayClient;
@@ -133,16 +135,26 @@ server.listen(PORT, '0.0.0.0', () => {
       placeOrder: placeOrderWithClient,
       placeOrderSell: placeOrderSellWithClient,
       executeSpreadTrade, 
+      executeSpreadTradeArb,
       client
     });
 
     autoBidBot.start(getCachedOpportunities);  
     console.log(`✅ AutoBid bot started...`);
     setInterval(loadNewMarkets, 15 * 60 * 1000); // каждые 15 минут
-
+    // getUserCurrentPositions('0x2005d16a84ceefa912d4e380cd32e7ff827875ea');
+    // getUserActivity('0x03c3b0236c5a01051381482e77f2210349073a1d');
+    // setInterval(() => {
+    //   getUserActivity('0x751a2b86cab503496efd325c8344e10159349ea1');
+    // }, 60 * 1000);    
     // проверка исходов
-    setInterval(() => {
-      syncResolvedMarkets(client).catch(console.error);
+    setInterval(async () => {
+      try {
+        await syncResolvedMarkets(client);
+        // cleanupResolvedButUnusedMarkets(); // ← добавили очистку
+      } catch (err) {
+        console.error("Error in market sync/cleanup:", err);
+      }
     }, 10 * 60 * 1000); // 10 минут   
     
  
@@ -158,6 +170,18 @@ userWS.connect();
 // При завершении
 process.on('SIGINT', () => {
   userWS.disconnect();
+  process.exit();
+});
+
+const rtdsWS = new RtdsPolymarketWebsocket((data) => {
+  // console.log("📡 RTDS data:", data.payload.symbol, data.payload.value);
+  // Обработка данных
+});
+rtdsWS.connect();
+
+// При завершении
+process.on('SIGINT', () => {
+  rtdsWS.disconnect();
   process.exit();
 });
 
@@ -316,9 +340,94 @@ app.post("/api/claim-profits", async (req, res) => {
   }
 });
 
+// --- API: Block event ---
+app.post("/api/block-event", async (req, res) => {
+  try {
+    const { conditionId } = req.body;
 
+    if (!conditionId) {
+      return res.status(400).json({ success: false, error: "conditionId is required" });
+    }
 
+    // Удаляем из кэша
+    const removed = removeMarketFromCache(conditionId);
 
+    if (removed) {
+      console.log(`🗑️ Market blocked and removed: ${conditionId}`);
+      res.json({ success: true, message: "Market blocked" });
+    } else {
+      res.json({ success: false, message: "Market not found" });
+    }
+  } catch (e) {
+    console.error("❌ Block event error:", e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// --- API: Place manual order ---
+app.post("/api/place-order", async (req, res) => {
+  try {
+    const { tokenID, price, size = 5, side = "BUY", conditionId } = req.body;
+
+    if (!tokenID || !price || !conditionId) {
+      return res.status(400).json({ success: false, error: "Missing required fields" });
+    }
+
+    // Находим рынок, чтобы получить доп. параметры
+    const opp = getCachedOpportunities().find(o => o.conditionId === conditionId);
+    if (!opp) {
+      return res.status(404).json({ success: false, error: "Market not found" });
+    }
+    console.log(price);
+
+    let outcome = {
+      assetId: tokenID
+    }
+    const result = await executeSpreadTrade({
+      placeOrder,
+      placeOrderSell,
+      client,
+      outcome,
+      opp,
+      buyPrice: price,
+      sellPrice: price + 0.02,
+      size: size,
+      onSignal: ({ type, opp, text, secondsLeft }) => {
+        broadcast({
+          type: type,
+          data: {
+            id: opp.id,
+            opp: opp,
+            text: text,
+            secondsLeft
+          },
+          ts: Date.now()
+        });
+      },
+    });
+    console.log(result);
+    // // Выполняем ордер
+    // const orderFn = side === "SELL" ? placeOrderSellWithClient : placeOrderWithClient;
+    // const result = await orderFn({
+    //   tokenID,
+    //   price,
+    //   size,
+    //   side,
+    //   orderPriceMinTickSize: opp.orderPriceMinTickSize,
+    //   negRisk: opp.negRisk,
+    //   oppId: opp.id
+    // });
+
+    // res.json({
+    //   success: true,
+    //   order: result
+    // });
+
+  } catch (e) {
+    console.error("❌ Manual order error:", e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
 
 
 

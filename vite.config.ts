@@ -6,13 +6,13 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
       server: {
-        port: 14882,
+        port: 14883,
         host: '0.0.0.0',
 
         // 🔥 Вот это надо добавить!
         proxy: {
           '/api': {
-            target: 'http://192.168.1.168:3001',
+            target: 'http://192.168.1.168:3002',
             changeOrigin: true,
             secure: false,
           }
