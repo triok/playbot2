@@ -29,22 +29,22 @@ export async function executeSpreadTrade({
 
   // console.log(`executeSpreadTrade -> BUY: `);
   // console.log(buy);
-  if (!buy?.orderID) return { ok: false, stage: "buy_failed" };
-  let buyStatus;
-  let timeoutMs = 6000;
-  buyStatus = await waitForOrderMatch(client, buy.orderID, timeoutMs);
+  // if (!buy?.orderID) return { ok: false, stage: "buy_failed" };
+  // let buyStatus;
+  // let timeoutMs = 6000;
+  // buyStatus = await waitForOrderMatch(client, buy.orderID, timeoutMs);
 
-  timeoutMs = 3000;
-  buyStatus = await waitForOrderMatch(client, buy.orderID, timeoutMs);
-  console.log(`executeSpreadTrade -> buyStatus: `);
-  console.log(buyStatus, buy.orderID, opp.id, opp.slug);
-  // let buyStatus = 'matched'
+  // timeoutMs = 3000;
+  // buyStatus = await waitForOrderMatch(client, buy.orderID, timeoutMs);
+  // console.log(`executeSpreadTrade -> buyStatus: `);
+  // console.log(buyStatus, buy.orderID, opp.id, opp.slug);
+  let buyStatus = 'matched';
   if (buyStatus !== "matched") {
     return { ok: false, stage: "buy_not_filled (live/cancelled)" };
   }
 
-  let balance = await waitForBalance(client, outcome.assetId, opp, onSignal, buy.orderID);
-  console.log('check balance 1: ', balance);
+  // let balance = await waitForBalance(client, outcome.assetId, opp, onSignal, buy.orderID);
+  // console.log('check balance 1: ', balance);
   
    // пауза на 12 секунд
   // await new Promise((resolve) => setTimeout(resolve, 12_000));

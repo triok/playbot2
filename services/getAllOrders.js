@@ -4,6 +4,11 @@ import path from "path";
 const ORDERS_FILE = path.resolve("services/orders_data.json");
 const GAMMA_API = "https://gamma-api.polymarket.com/markets";
 
+// export async function getOrder(client, orderIdToCheck){
+//   const order = await client.getOrder(client, orderIdToCheck);
+//   return order;
+// }
+
 export async function getAllOrders(clobClient) {
   // if (!fs.existsSync(ORDERS_FILE)) {
   //   console.log("📂 orders_data.json не найден");
@@ -103,3 +108,5 @@ export async function getAllOrders(clobClient) {
   //   console.error("❌ Ошибка при запросе Gamma API:", err.message);
   // }
 }
+
+

@@ -10,13 +10,13 @@ export function handleClientConnection(ws, options) {
     } = options;
   
     ws.on('open', () => {
-      console.log('🟢 Client connected via WebSocket');
+      console.log('[WS_CLIENT_HANDLER] Client connected via WebSocket');
     });
   
     (async () => {
       await opportunitiesReady;
   
-      console.log('🟢 Client connected via WebSocket');
+      console.log('[WS_CLIENT_HANDLER] Client connected via WebSocket');
   
       // 1️⃣ Отдаём snapshot сразу
       ws.send(JSON.stringify({
@@ -41,12 +41,12 @@ export function handleClientConnection(ws, options) {
         // console.log('📩 WS message:', msg);
         // Здесь можно обрабатывать команды от клиента
       } catch {
-        console.warn('Invalid WS message');
+        console.warn('[WS_CLIENT_HANDLER] Invalid WS message');
       }
     });
   
     ws.on('close', () => {
-      console.log('🔴 Client disconnected');
+      console.log('[WS_CLIENT_HANDLER] Client disconnected');
     });
   }
   

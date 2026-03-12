@@ -71,9 +71,10 @@ export async function checkMarket(client, conditionId) {
     throw new Error("clobClient not initialized");
   }
 
-  console.log("📡 Fetching market from Polymarket:", conditionId);
+  // console.log("📡 Fetching market from Polymarket:", conditionId);
 
   const market = await client.getMarket(conditionId);
+
   const winningToken = market.tokens.find(t => t.winner);
 
   // 🔴 Если рынок ещё не разрешился — выходим
@@ -85,10 +86,15 @@ export async function checkMarket(client, conditionId) {
   opp = cachedOpportunities.find(o => o.conditionId === conditionId);
 
   if (!winningToken) {
-    console.log(`⚠️ Market ${conditionId} is not resolved yet.`);
+    // console.log(`⚠️ Market ${conditionId} is not resolved yet.`);
     return { market, opp: opp, text: null }; // или просто return;
   }
 
+  if (!opp) {
+    console.warn(`⚠️ Opportunity not found in cache for conditionId: ${conditionId}`);
+    return { market, opp: null, text: winningToken?.outcome };
+  }
+  
   logText = `[${nowTime()}] resolved: ${winningToken?.outcome}`;
   pushMarketLog(opp.id, logText);
 
@@ -133,16 +139,15 @@ function resortAndReorder() {
 }
 
 export async function syncResolvedMarkets(client) {
-  // console.log(client);
 
   if (marketStates.size === 0) {
-    console.log('🔍 No tracked markets in marketStates — skipping sync.');
+    console.log('[MARKET CACHE] No tracked markets in marketStates — skipping sync.');
     return;
   }
 
   const opportunities = getCachedOpportunities();
   if (!opportunities || opportunities.length === 0) {
-    console.log('⚠️ No cached opportunities — cannot resolve conditionId');
+    console.log('[MARKET CACHE] No cached opportunities — cannot resolve conditionId');
     return;
   }
   // console.log(opportunities);
@@ -153,6 +158,8 @@ export async function syncResolvedMarkets(client) {
   }
 
   let count = 0;
+  const deadMarkets = [];
+
   for (const [marketId, state] of marketStates.entries()) {
     // Пропускаем, если resolved уже известен
     if (state.resolved !== undefined) {
@@ -161,20 +168,26 @@ export async function syncResolvedMarkets(client) {
 
     const conditionId = idToConditionId.get(marketId);
     if (!conditionId) {
-      console.warn(`❓ No conditionId found for marketId: ${marketId}`);
+      console.warn(`[MARKET CACHE] No conditionId found for marketId: ${marketId}`);
+      deadMarkets.push(marketId);
       continue;
     }
 
     try {
-      console.log(`🔄 Checking resolution status for market ${marketId} (${conditionId})...`);
+      // console.log(`🔄 Checking resolution status for market ${marketId} (${conditionId})...`);
       await checkMarket(client, conditionId);
       count++;
     } catch (err) {
-      console.error(`❌ Failed to check market ${marketId}:`, err);
+      console.error(`[MARKET CACHE] Failed to check market ${marketId}:`, err);
     }
   }
 
-  console.log(`✅ Synced ${count} unresolved markets.`);
+  // 🔑 Удаляем "мёртвые" рынки из кэша
+  for (const marketId of deadMarkets) {
+    marketStates.delete(marketId);
+  }
+
+  console.log(`[MARKET CACHE] Synced ${count} unresolved markets.`);
 }
 
 /**
@@ -182,70 +195,44 @@ export async function syncResolvedMarkets(client) {
  * - имеют resolved в marketStates,
  * - но не имеют ни одного botResult (1, 2 или 3)
  */
-// export function cleanupResolvedButUnusedMarkets() {
-//   const now = new Date();
-//   const initialCount = cachedOpportunities.length;
 
-//   // Фильтруем: оставляем только те, что НЕ подпадают под условие удаления
-//   cachedOpportunities = cachedOpportunities.filter(opp => {
-//     const isExpired = new Date(opp.rawEndDate) <= now;
-//     const state = marketStates.get(opp.id);
-
-//     // Если нет состояния — оставляем (ещё не разрешился или не отслеживается)
-//     if (!state) return true;
-
-//     // Если нет resolved — оставляем (ещё активен)
-//     if (state.resolved === undefined) return true;
-
-//     // Если есть хотя бы один botResult — оставляем (бот участвовал)
-//     if (
-//       state.botResult1 !== undefined ||
-//       state.botResult2 !== undefined ||
-//       state.botResult3 !== undefined ||
-//       state.outcome_1_46 !== undefined
-//     ) {
-//       return true;
-//     }
-
-//     // Иначе — удаляем: resolved есть, но бот не участвовал
-//     console.log(`🗑️ Removing unused resolved market: ${opp.title} (${opp.id})`);
-//     return false;
-//   });
-
-//   const removedCount = initialCount - cachedOpportunities.length;
-//   if (removedCount > 0) {
-//     console.log(`✅ Cleaned up ${removedCount} resolved but unused markets.`);
-//     resortAndReorder(); // обновляем порядок и номера
-//   }
-// }
 export function cleanupResolvedButUnusedMarkets() {
   const now = new Date();
   const initialCount = cachedOpportunities.length;
-
+  const EXPIRATION_BUFFER_MS = 20 * 60 * 1000; // 20 минут в миллисекундах
   const assetsToUnsubscribe = [];
 
   cachedOpportunities = cachedOpportunities.filter(opp => {
     const state = marketStates.get(opp.id);
-    const isExpired = new Date(opp.rawEndDate) <= now;
+    const isExpired = new Date(opp.rawEndDate).getTime() + EXPIRATION_BUFFER_MS <= now;
+
+    if (isExpired && opp.outcomes && Array.isArray(opp.outcomes)) {
+      opp.outcomes.forEach(outcome => {
+        if (outcome.assetId) {
+          assetsToUnsubscribe.push(outcome.assetId);
+        }
+      });
+    }
 
     // ❌ Удаляем, если рынок истёк И не был использован
     if (isExpired) {
       // Случай 1: вообще нет состояния → точно не участвовали
       if (!state) {
-        console.log(`🗑️ Removing expired market (no state): ${opp.title} (${opp.id})`);
-        if (opp.outcomes && Array.isArray(opp.outcomes)) {
-          opp.outcomes.forEach(outcome => {
-            if (outcome.assetId) {
-              assetsToUnsubscribe.push(outcome.assetId);
-            }
-          });
-        }
+        console.log(`[MARKET CACHE] Removing expired market (no state): ${opp.title} (${opp.id})`);
+        // if (opp.outcomes && Array.isArray(opp.outcomes)) {
+        //   opp.outcomes.forEach(outcome => {
+        //     if (outcome.assetId) {
+        //       assetsToUnsubscribe.push(outcome.assetId);
+        //     }
+        //   });
+        // }
         return false;
       }
 
       // Случай 2: есть состояние, но бот не участвовал
       // Удаляем, если нет НИ ОДНОГО признака участия
       const hasBotActivity = 
+        state.arbitrage !== undefined ||
         state.botResult1 !== undefined ||
         state.botResult2 !== undefined ||
         state.botResult3 !== undefined ||
@@ -255,7 +242,7 @@ export function cleanupResolvedButUnusedMarkets() {
         state.outcome_1_46 !== undefined;
 
       if (!hasBotActivity) {
-        console.log(`🗑️ Removing resolved but unused market: ${opp.title}`);
+        console.log(`[MARKET CACHE] Removing resolved but unused market: ${opp.title}`);
         return false;
       }      
     }
@@ -268,18 +255,18 @@ export function cleanupResolvedButUnusedMarkets() {
   });
 
   if (assetsToUnsubscribe.length > 0) {
-    console.log(`📡 Unsubscribing from ${assetsToUnsubscribe.length} assets via WebSocket`);
+    console.log(`[MARKET CACHE] Unsubscribing from ${assetsToUnsubscribe.length} assets via WebSocket`);
     polymarketWS.unsubscribeAssets(assetsToUnsubscribe);
   }  
   const removedCount = initialCount - cachedOpportunities.length;
 
   if (removedCount > 0) {
-    console.log(`✅ Cleaned up ${removedCount} expired or unused markets.`);
+    console.log(`[MARKET CACHE] Cleaned up ${removedCount} expired or unused markets.`);
     resortAndReorder();
   }
 }
 /**
- * Удаляет рынок из cachedOpportunities по conditionId
+ * Удаляет рынок из cachedOpportunities по conditionId по кнопке на фронте (Х)
  * @param {string} conditionId
  * @returns {boolean} true если удалён
  */
@@ -287,4 +274,95 @@ export function removeMarketFromCache(conditionId) {
   const initialLength = cachedOpportunities.length;
   cachedOpportunities = cachedOpportunities.filter(opp => opp.conditionId !== conditionId);
   return cachedOpportunities.length < initialLength;
+}
+
+export async function getMarketOrderBook(assetId) {
+  try {
+    // ✅ Прямой запрос к CLOB API по assetId (это и есть token_id)
+    const bookUrl = `https://clob.polymarket.com/book?token_id=${encodeURIComponent(assetId)}`;
+    const bookRes = await fetch(bookUrl);
+    
+    if (!bookRes.ok) {
+      throw new Error(`CLOB API ${bookRes.status}: ${bookRes.statusText}`);
+    }
+    
+    const orderBook = await bookRes.json();
+    
+    // Валидация ответа
+    if (!orderBook?.bids || !orderBook?.asks) {
+      throw new Error('Invalid order book structure');
+    }
+    
+    return { orderBook };
+    
+  } catch (error) {
+    console.error(`[MARKET CACHE] Order book fetch failed for assetId ${assetId}:`, error.message);
+    throw error;
+  }
+}
+
+/**
+ * Полностью очищает кэш рынков
+ * @param {Object} options
+ * @param {boolean} options.clearMarketStates - также очистить состояния рынков (по умолчанию: false)
+ * @param {boolean} options.unsubscribeAll - отписаться от всех активов в вебсокете (по умолчанию: true)
+ * @returns {number} количество удалённых рынков
+ */
+export function clearAllOpportunities({ clearMarketStates = true, unsubscribeAll = true } = {}) {
+  const initialCount = cachedOpportunities.length;
+  
+  if (initialCount === 0) {
+    console.log('[MARKET CACHE] Cache already empty — nothing to clear');
+    return 0;
+  }
+
+  // 🔑 Собираем все assetId для отписки от вебсокета
+  const allAssetIds = [];
+  if (unsubscribeAll) {
+    cachedOpportunities.forEach(opp => {
+      if (opp.outcomes && Array.isArray(opp.outcomes)) {
+        opp.outcomes.forEach(outcome => {
+          if (outcome.assetId) {
+            allAssetIds.push(outcome.assetId);
+          }
+        });
+      }
+    });
+  }
+
+  // 🔑 Очищаем кэш
+  cachedOpportunities = [];
+  
+  // 🔑 Отписываемся от всех активов
+  if (unsubscribeAll && allAssetIds.length > 0 && polymarketWS?.unsubscribeAssets) {
+    console.log(`[MARKET CACHE] Unsubscribing from ${allAssetIds.length} assets via WebSocket`);
+    polymarketWS.unsubscribeAssets(allAssetIds);
+  }
+
+  // 🔑 Опционально очищаем состояния рынков
+  let statesCleared = 0;
+  if (clearMarketStates && marketStates.size > 0) {
+    statesCleared = marketStates.size;
+    marketStates.clear();
+    console.log(`[MARKET CACHE] Cleared ${statesCleared} market states`);
+  }
+
+  console.log(`[MARKET CACHE] ✅ Cleared all ${initialCount} opportunities from cache`);
+  
+  return initialCount;
+}
+
+export function setArbitrageToMarket(conditionId){
+  const opp = cachedOpportunities.find(o => o.conditionId === conditionId);
+
+  if(opp){
+    opp.arbitrage = true;
+    updateMarketState(opp.id, {
+      arbitrage: true
+    });
+    const logText = `[${nowTime()}] start arbitrage`;
+    pushMarketLog(opp.id, logText);
+    return true;
+  }
+  return false;
 }

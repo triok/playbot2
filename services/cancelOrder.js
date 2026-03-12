@@ -1,4 +1,5 @@
-
+import { OrderType, Side } from "@polymarket/clob-client";
+import { arbitrageTestFlag } from "./utils.js"; 
 export async function waitForOrderMatch(client, orderID, timeoutMs) {
     const start = Date.now();
 
@@ -19,3 +20,24 @@ export async function waitForOrderMatch(client, orderID, timeoutMs) {
     await client.cancelOrder(orderID);
     return "cancelled";
   }
+
+export async function cancelOrder(client, orderID){
+
+  let result;
+
+  if(arbitrageTestFlag){
+    // <<-- тест
+    result = {
+      not_canceled: [],
+      canceled: [orderID]
+    }
+    // -->>
+  } else{
+    result = await client.cancelOrder({
+      orderID: orderID, 
+    });
+  }
+
+  console.log(`[cancelOrder]:`, result);
+  return result;
+}

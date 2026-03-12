@@ -13,7 +13,7 @@ export function startClaimScheduler(client, relayClient) {
 
     // нас интересует только диапазон xx:12, xx:27, xx:42, xx:57
     const claimMinute =
-      minutes === 12 ||
+      minutes === 8 ||
       minutes === 27 ||
       minutes === 42 ||
       minutes === 57;
@@ -26,13 +26,13 @@ export function startClaimScheduler(client, relayClient) {
 
     lastClaimSlot = slot;
 
-    console.log(`[${nowTime()}] 💰 Running scheduled CLAIM`);
+    console.log(`[${nowTime()}][GET MY PROFITS] Running scheduled CLAIM`);
 
     try {
       const res = await getMyProfits(client, relayClient);
-      console.log(`[${nowTime()}] ✅ Claim done`);
+      console.log(`[${nowTime()}][GET MY PROFITS] Claim done`);
     } catch (e) {
-      console.error(`[${nowTime()}] ❌ Claim failed`, e);
+      console.error(`[${nowTime()}][GET MY PROFITS] Claim failed`, e);
     }
 
   }, 1000);
@@ -41,7 +41,7 @@ export function startClaimScheduler(client, relayClient) {
 export async function getMyProfits(clobClient, relayClient) {
 
   const trades = await clobClient.getTrades();
-  console.log(`You've made ${trades.length} trades`);
+  // console.log(`You've made ${trades.length} trades`);
 
   // --- Уникальные маркет ID из твоих сделок ---
   let uniqueMarkets = Array.from(new Set(trades.map(t => t.market)));
@@ -55,7 +55,7 @@ export async function getMyProfits(clobClient, relayClient) {
       // --- Ищем выигрышный токен ---
       const winningToken = market.tokens.find(t => t.winner === true);
       if (!winningToken) {
-        console.log(`No winning token found for market ${market.market_slug}, skipping.`);
+        // console.log(`No winning token found for market ${market.market_slug}, skipping.`);
         continue;
       }
       // console.log("Winning token:", winningToken);
@@ -67,11 +67,11 @@ export async function getMyProfits(clobClient, relayClient) {
       // console.log("Balance info:", balanceInfo);
       const balance = Number(balanceInfo.balance);
       if (balance <= 0) {
-        console.log(`No winning tokens for market ${market.market_slug} in your wallet, skipping.`);
+        // console.log(`No winning tokens for market ${market.market_slug} in your wallet, skipping.`);
         continue;
       }
 
-      console.log(`Claiming ${balance} tokens from market ${market.market_slug}...`);
+      console.log(`[${nowTime()}][GET MY PROFITS] Claiming ${balance} tokens from market ${market.market_slug}...`);
 
       // --- Redeem через CTF ---
       // Создаем карту outcome → index
@@ -116,7 +116,7 @@ export async function getMyProfits(clobClient, relayClient) {
     const response = await relayClient.execute([redeemTx], "Redeem positions");
     await response.wait();
     } catch (err) {
-      console.error("Error claiming market:", marketId, err);
+      console.error("[${nowTime()}][GET MY PROFITS] Error claiming market:", marketId, err);
     }
   }
 

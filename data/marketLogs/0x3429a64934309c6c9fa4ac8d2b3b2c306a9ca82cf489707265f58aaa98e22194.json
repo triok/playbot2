@@ -1,0 +1,212 @@
+[
+  {
+    "timestamp": "2026-03-11T21:41:20.061Z",
+    "local_time": "00:41:20",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[00:41:20] Ответ от placeArbitrageOrder",
+      "status": "fake",
+      "success": true,
+      "orderId": "17732652740583687070",
+      "price": 0.45,
+      "size": 6,
+      "errorMsg": "fake order",
+      "orderPriceMinTickSize": "0.01"
+    }
+  },
+  {
+    "timestamp": "2026-03-11T21:41:20.061Z",
+    "local_time": "00:41:20",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[00:41:20] Ответ от placeArbitrageOrder",
+      "status": "fake",
+      "success": true,
+      "orderId": "17732652740587625293",
+      "price": 0.45,
+      "size": 6,
+      "errorMsg": "fake order",
+      "orderPriceMinTickSize": "0.01"
+    }
+  },
+  {
+    "timestamp": "2026-03-11T21:41:20.061Z",
+    "local_time": "00:41:20",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[00:41:20] ✅ Both initial orders placed, next phase \"waiting_first_match\""
+    }
+  },
+  {
+    "timestamp": "2026-03-11T21:41:22.075Z",
+    "local_time": "00:41:22",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[00:41:22] State phase: [waiting_first_match]. First order matched [Down] for 0.3290049751243781, cancelling other..."
+    }
+  },
+  {
+    "timestamp": "2026-03-11T21:41:22.076Z",
+    "local_time": "00:41:22",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[00:41:22] State phase: [first_matched]. Second cancelled, next phase: \"first_matched\"  get_positions."
+    }
+  },
+  {
+    "timestamp": "2026-03-11T21:41:22.076Z",
+    "local_time": "00:41:22",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[00:41:22] State phase: [first_matched]. Get order result:",
+      "order": {
+        "id": 123,
+        "status": "MATCHED",
+        "price": 0.42,
+        "size_matched": 12
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-11T21:41:22.076Z",
+    "local_time": "00:41:22",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[00:41:22] State phase: [first_matched]. Entry confirmed [Down]: 12 shares, \"@\", 0.3290049751243781. Next phase: \"recalculate\""
+    }
+  },
+  {
+    "timestamp": "2026-03-11T21:41:23.077Z",
+    "local_time": "00:41:23",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[00:41:23] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.679000199960008\", need: 17.16 shares, \"@\", $11.65"
+    }
+  },
+  {
+    "timestamp": "2026-03-11T21:41:30.083Z",
+    "local_time": "00:41:30",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[00:41:30] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "status": "fake",
+        "success": true,
+        "orderID": "17732652840774056200",
+        "takingAmount": "",
+        "makingAmount": "",
+        "errorMsg": "fake order"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-11T21:41:33.173Z",
+    "local_time": "00:41:33",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[00:41:33] State phase: [waiting_first_hedge_fill]. Hedge orders matched. Recalculating positions..."
+    }
+  },
+  {
+    "timestamp": "2026-03-11T21:44:29.770Z",
+    "local_time": "00:44:29",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[00:44:29] Action: ",
+      "result": {
+        "S_A": 12,
+        "S_B": 17.16,
+        "I_A": 3.948059701492537,
+        "I_B": 11.840399999999999,
+        "I_total": 15.79,
+        "avg_A": 0.33,
+        "avg_B": 0.69,
+        "pairCost": 1.02,
+        "P_A": 0.87,
+        "P_B": 0.179002493765586,
+        "Profit_A": -3.79,
+        "Profit_A_perc": "-24.0%",
+        "Profit_B": 1.37,
+        "Profit_B_perc": "8.7%",
+        "isRiskFree": false,
+        "riskFreeProximity": -0.23995119049734792,
+        "nextTurn": "winner",
+        "action": {
+          "type": "buy",
+          "assetId": "109179973560874745716643056290712811301940949709853316772847403269408896044210",
+          "name": "Down",
+          "size": 1.15,
+          "amount": 1,
+          "price": 0.87,
+          "order_type": "FOK",
+          "reason": "leader buy Down @ 0.87",
+          "nextTurn": "winner",
+          "sim": {
+            "S_A": 13.15,
+            "S_B": 17.16,
+            "I_total": 16.79,
+            "fee": 0.0032,
+            "Profit_A": -3.64,
+            "Profit_B": 0.37,
+            "isRiskFree": false
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-11T21:44:51.874Z",
+    "local_time": "00:44:51",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[00:44:51] State phase: [waiting_arbitrage_fill]. All arbitrage orders matched. Recalculating positions..."
+    }
+  },
+  {
+    "timestamp": "2026-03-11T21:44:57.886Z",
+    "local_time": "00:44:57",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[00:44:57] Action: ",
+      "result": {
+        "S_A": 13.15,
+        "S_B": 17.16,
+        "I_A": 4.948559701492537,
+        "I_B": 11.840399999999999,
+        "I_total": 16.79,
+        "avg_A": 0.38,
+        "avg_B": 0.69,
+        "pairCost": 1.07,
+        "P_A": 0.94,
+        "P_B": 0.0690049751243781,
+        "Profit_A": -3.64,
+        "Profit_A_perc": "-21.7%",
+        "Profit_B": 0.37,
+        "Profit_B_perc": "2.2%",
+        "isRiskFree": false,
+        "riskFreeProximity": -0.21674718185004838,
+        "nextTurn": "winner",
+        "action": {
+          "type": "buy",
+          "assetId": "28466462068761385412744669923302247091346281701265604794261081712339939842131",
+          "name": "Up",
+          "size": 14.5,
+          "amount": 1,
+          "price": 0.0690049751243781,
+          "order_type": "FOK",
+          "reason": "underdog insurance @ 0.0690049751243781 (leader=Down @ 0.94)",
+          "nextTurn": "winner",
+          "sim": {
+            "S_A": 13.15,
+            "S_B": 31.66,
+            "I_total": 17.79,
+            "fee": 0.001,
+            "Profit_A": -4.64,
+            "Profit_B": 13.87,
+            "isRiskFree": false
+          }
+        }
+      }
+    }
+  }
+]

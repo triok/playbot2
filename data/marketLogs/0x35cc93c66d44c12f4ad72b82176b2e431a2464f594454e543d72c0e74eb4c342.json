@@ -1,0 +1,142 @@
+[
+  {
+    "timestamp": "2026-03-11T08:14:43.449Z",
+    "local_time": "11:14:43",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[11:14:43] Ответ от placeArbitrageOrder",
+      "status": "fake",
+      "success": true,
+      "orderId": "17732168774481587238",
+      "price": 0.45,
+      "size": 6,
+      "errorMsg": "fake order",
+      "orderPriceMinTickSize": "0.01"
+    }
+  },
+  {
+    "timestamp": "2026-03-11T08:14:43.449Z",
+    "local_time": "11:14:43",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[11:14:43] Ответ от placeArbitrageOrder",
+      "status": "fake",
+      "success": true,
+      "orderId": "17732168774498189667",
+      "price": 0.45,
+      "size": 6,
+      "errorMsg": "fake order",
+      "orderPriceMinTickSize": "0.01"
+    }
+  },
+  {
+    "timestamp": "2026-03-11T08:14:43.450Z",
+    "local_time": "11:14:43",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[11:14:43] ✅ Both initial orders placed, next phase \"waiting_first_match\""
+    }
+  },
+  {
+    "timestamp": "2026-03-11T08:15:12.555Z",
+    "local_time": "11:15:12",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[11:15:12] State phase: [waiting_first_match]. First order matched [Up] for 0.44, cancelling other..."
+    }
+  },
+  {
+    "timestamp": "2026-03-11T08:15:12.555Z",
+    "local_time": "11:15:12",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[11:15:12] State phase: [first_matched]. Second cancelled, next phase: \"first_matched\"  get_positions."
+    }
+  },
+  {
+    "timestamp": "2026-03-11T08:15:12.556Z",
+    "local_time": "11:15:12",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[11:15:12] State phase: [first_matched]. Get order result:",
+      "order": {
+        "id": 123,
+        "status": "MATCHED",
+        "price": 0.45,
+        "size_matched": 6
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-11T08:15:12.556Z",
+    "local_time": "11:15:12",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[11:15:12] State phase: [first_matched]. Entry confirmed [Up]: 6 shares, \"@\", 0.44. Next phase: \"recalculate\""
+    }
+  },
+  {
+    "timestamp": "2026-03-11T08:15:13.557Z",
+    "local_time": "11:15:13",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[11:15:13] State phase: [first_matched]. Hedge [Down] recalculated. now_price: \"0.52\", need: 6.05 shares, \"@\", $3.15"
+    }
+  },
+  {
+    "timestamp": "2026-03-11T08:15:20.563Z",
+    "local_time": "11:15:20",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[11:15:20] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "status": "fake",
+        "success": false,
+        "orderID": "17732169145566770752",
+        "takingAmount": "",
+        "makingAmount": "",
+        "errorMsg": "fake order"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-11T08:15:20.563Z",
+    "local_time": "11:15:20",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[11:15:20] State phase: [enter_hedge]. First hedge failed"
+    }
+  },
+  {
+    "timestamp": "2026-03-11T08:15:26.611Z",
+    "local_time": "11:15:26",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[11:15:26] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "status": "fake",
+        "success": true,
+        "orderID": "17732169206111932720",
+        "takingAmount": "",
+        "makingAmount": "",
+        "errorMsg": "fake order"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-11T08:15:28.636Z",
+    "local_time": "11:15:28",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[11:15:28] State phase: [waiting_first_hedge_fill]. Hedge orders matched. Recalculating positions..."
+    }
+  },
+  {
+    "timestamp": "2026-03-11T08:21:57.446Z",
+    "local_time": "11:21:57",
+    "category": "polymarket_handler",
+    "data": {
+      "message": "Resolved: \"Down\""
+    }
+  }
+]

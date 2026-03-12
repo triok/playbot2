@@ -1,0 +1,140 @@
+[
+  {
+    "timestamp": "2026-02-24T15:41:55.089Z",
+    "local_time": "18:41:55",
+    "category": "autobidbot_stage",
+    "data": {
+      "message": "[18:41:55] Down = 0.990 (Stage 1: <170s)"
+    }
+  },
+  {
+    "timestamp": "2026-02-24T15:42:05.002Z",
+    "local_time": "18:42:05",
+    "category": "autobidbot_stage",
+    "data": {
+      "message": "[18:42:05] START BIDDING: \"Down\" for 1 at 174s"
+    }
+  },
+  {
+    "timestamp": "2026-02-24T15:42:16.202Z",
+    "local_time": "18:42:16",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[18:42:16] Ответ от placeTestOrder",
+      "status": 400,
+      "price": 0.99,
+      "size": 6,
+      "orderPriceMinTickSize": 0.01
+    }
+  },
+  {
+    "timestamp": "2026-02-24T15:42:16.202Z",
+    "local_time": "18:42:16",
+    "category": "autobidbot_buy",
+    "data": {
+      "type": "autobidbot_buy",
+      "error": "invalid expiration value (1771947795), the value has to be in the future and there is a security threshold of one minute. If the order needs to expire in 30 seconds the correct expiration value is: now + 1 minute + 30 seconds"
+    }
+  },
+  {
+    "timestamp": "2026-02-24T15:43:00.165Z",
+    "local_time": "18:43:00",
+    "category": "autobidbot_stage",
+    "data": {
+      "message": "[18:43:00] Down = 1.000 (Stage 2: <120s)"
+    }
+  },
+  {
+    "timestamp": "2026-02-24T15:44:30.440Z",
+    "local_time": "18:44:30",
+    "category": "autobidbot_stage",
+    "data": {
+      "message": "[18:44:30] Down = 1.000 (Stage 3: <40s)"
+    }
+  },
+  {
+    "timestamp": "2026-02-24T15:44:45.029Z",
+    "local_time": "18:44:45",
+    "category": "autobidbot_stage",
+    "data": {
+      "message": "[18:44:45] START BIDDING 0999: \"Down\" for 1 at 14s"
+    }
+  },
+  {
+    "timestamp": "2026-02-24T15:44:48.005Z",
+    "local_time": "18:44:48",
+    "category": "user_polymarket_websocket_order",
+    "data": {
+      "id": "0x9a024a36def35857b892386110abc9b6b26847bc941e50b438a5187c17bf1969",
+      "owner": "974024e9-b35e-a1ca-6eb7-3f9da0e8a0f9",
+      "market": "0x2e4e88a132e62dbe25261c9a5be2e243b86e94674dbd2e836c5c5bc70a5c6b37",
+      "asset_id": "42844396464244888113168755836072104920091607889058388879198865401413889389508",
+      "side": "BUY",
+      "order_owner": "974024e9-b35e-a1ca-6eb7-3f9da0e8a0f9",
+      "original_size": "6",
+      "size_matched": "0",
+      "price": "0.99",
+      "associate_trades": [],
+      "outcome": "Down",
+      "type": "PLACEMENT",
+      "created_at": "1771947888",
+      "expiration": "0",
+      "order_type": "GTC",
+      "status": "LIVE",
+      "maker_address": "0xFe61Da21eBdf55a8916d0e34205F0cf4989505cd",
+      "timestamp": "1771947888272",
+      "event_type": "order"
+    }
+  },
+  {
+    "timestamp": "2026-02-24T15:44:48.163Z",
+    "local_time": "18:44:48",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[18:44:48] Ответ от placeTestOrder",
+      "status": "live",
+      "success": true,
+      "orderId": "0x9a024a36def35857b892386110abc9b6b26847bc941e50b438a5187c17bf1969",
+      "price": 0.999,
+      "size": 6,
+      "takingAmount": "",
+      "makingAmount": "",
+      "errorMsg": "",
+      "orderPriceMinTickSize": "0.001"
+    }
+  },
+  {
+    "timestamp": "2026-02-24T15:45:14.516Z",
+    "local_time": "18:45:14",
+    "category": "polymarket_handler",
+    "data": {
+      "message": "Tick size changed to: \"0.001\""
+    }
+  },
+  {
+    "timestamp": "2026-02-24T15:47:02.130Z",
+    "local_time": "18:47:02",
+    "category": "user_polymarket_websocket_order",
+    "data": {
+      "id": "0x9a024a36def35857b892386110abc9b6b26847bc941e50b438a5187c17bf1969",
+      "owner": "974024e9-b35e-a1ca-6eb7-3f9da0e8a0f9",
+      "market": "0x2e4e88a132e62dbe25261c9a5be2e243b86e94674dbd2e836c5c5bc70a5c6b37",
+      "asset_id": "42844396464244888113168755836072104920091607889058388879198865401413889389508",
+      "side": "BUY",
+      "order_owner": "974024e9-b35e-a1ca-6eb7-3f9da0e8a0f9",
+      "original_size": "6",
+      "size_matched": "0",
+      "price": "0.99",
+      "associate_trades": [],
+      "outcome": "Down",
+      "type": "CANCELLATION",
+      "created_at": "1771947888",
+      "expiration": "0",
+      "order_type": "GTC",
+      "status": "CANCELED_MARKET_RESOLVED",
+      "maker_address": "0xFe61Da21eBdf55a8916d0e34205F0cf4989505cd",
+      "timestamp": "1771948022400",
+      "event_type": "order"
+    }
+  }
+]

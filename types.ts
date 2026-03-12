@@ -46,6 +46,8 @@ export interface Opportunity {
   resultChecked?: boolean;  
   orderMinSize: number;
   orderPriceMinTickSize: number;
+  tickSizeBuy: number;
+  tickSizeSell: number;
   negRisk: boolean;
   order?: number;
   keyword?: string; 

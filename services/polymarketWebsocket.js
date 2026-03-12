@@ -15,6 +15,9 @@ export class ServerPolymarketWebsocket {
 
   connect() {
     const url = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
+    console.log("[Polymarket WS] Connecting...");
+
+
     this.ws = new WebSocket(url);
 
     this.ws.on("open", () => {
@@ -74,32 +77,32 @@ export class ServerPolymarketWebsocket {
   }
 
   // подписка на новые ассеты
-    subscribeAssets(assetIds) {
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-      console.log(`[Polymarket WS] Current subscribed assets: ${this.assetIds.length}`);
-      // console.log(`Старые: `+this.assetIds);
-      // Фильтруем только новые, которых ещё нет в this.assetIds
-      const newIds = assetIds.filter(id => !this.assetIds.includes(id));
-      if (!newIds.length) return;
-    
-      // Отправляем подписку на WS
-      this.ws.send(JSON.stringify({
-        operation: "subscribe",
-        assets_ids: newIds
-      }));
-    
-      // Добавляем к текущему массиву подписок
-      this.assetIds = [...this.assetIds, ...newIds];
-    
-      // console.log(`[Polymarket WS] Subscribed to new assets: ${newIds.join(", ")}`);
-      console.log(`[Polymarket WS] New subscribed assets: ${this.assetIds.length}`);
-      // console.log(`Новые: `+this.assetIds);
-    }
+  subscribeAssets(assetIds) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    console.log(`[Polymarket WS] Current subscribed assets: ${this.assetIds.length}`);
+    // console.log(`Старые: `+this.assetIds);
+    // Фильтруем только новые, которых ещё нет в this.assetIds
+    const newIds = assetIds.filter(id => !this.assetIds.includes(id));
+    if (!newIds.length) return;
+  
+    // Отправляем подписку на WS
+    this.ws.send(JSON.stringify({
+      operation: "subscribe",
+      assets_ids: newIds
+    }));
+  
+    // Добавляем к текущему массиву подписок
+    this.assetIds = [...this.assetIds, ...newIds];
+  
+    // console.log(`[Polymarket WS] Subscribed to new assets: ${newIds.join(", ")}`);
+    console.log(`[Polymarket WS] New subscribed assets: ${this.assetIds.length}`);
+    // console.log(`Новые: `+this.assetIds);
+  }
 
   unsubscribeAssets(assetIds) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    // console.log(`[Polymarket WS] Currently subscribed assets: ${this.assetIds.length}`);
-    // ✅ вместо .has используем includes
+    console.log(`[Polymarket WS] Currently subscribed assets: ${this.assetIds.length}`);
+
     const ids = assetIds.filter(id => this.assetIds.includes(id));
     if (!ids.length) return;
   

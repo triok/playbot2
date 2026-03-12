@@ -4,8 +4,11 @@ import { scanForOpportunities } from './services/polymarketService';
 import { Opportunity, LogEntry } from './types';
 import Console from './components/Console';
 import StatsCard from './components/StatsCard';
+import MarketInfo  from  './components/MarketInfo';
 import { PolymarketWebsocket } from "./services/polymarketWebsocket";
 import { calculateTimeLeft } from "./utils/timeUtils";
+
+
 
 const CRYPTO_KEYWORDS = [
   'bitcoin',
@@ -28,7 +31,6 @@ const isCryptoMarket = (opp: Opportunity) => {
 
 export default function App() {
 
-  
 
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
@@ -77,7 +79,12 @@ export default function App() {
   const [calcBuy, setCalcBuy] = useState("");
   const [calcSell, setCalcSell] = useState("");
   const [marketStates, setMarketStates] = useState<Record<string, any>>({});
-
+  const [cryptoPrices, setCryptoPrices] = useState<Record<string, number>>({
+    BTC: 0,
+    ETH: 0,
+    SOL: 0,
+    XRP: 0
+  });
 
 
   // нужные
@@ -121,7 +128,6 @@ export default function App() {
         setMarketStates(initialStates);
         return;
       }
-
       if (msg.type === "price_change") {
         setOpportunities(prev => 
           prev.map(opp => {
@@ -144,8 +150,8 @@ export default function App() {
           })
         );
       }
-       // market resolved
-       if (msg.type === "market_resolved") {
+      // market resolved
+      if (msg.type === "market_resolved") {
         const { oid, marketId, winningOutcome } = msg.data;
 
         const text = `[${new Date().toLocaleTimeString()}] resolved: "${winningOutcome}"`;
@@ -173,7 +179,15 @@ export default function App() {
         setAutoBidStatus(initialLogs);
         return;
       }
-    
+      // 🟢 Обработчик для цен криптовалют
+      if (msg.type === "chainlink_price") {
+        const { symbol, price } = msg.data;
+        setCryptoPrices(prev => ({
+          ...prev,
+          [symbol]: price
+        }));
+      }  
+
       if (
         msg.type === "auto_bid_tracking" ||
         msg.type === "bidding" ||
@@ -191,7 +205,62 @@ export default function App() {
           };
         });
       }
-           
+
+      // 📚 Обработка ответа с ордербуком
+      if (msg.type === "order_book") {
+        const { conditionId, slug, orderBook, winningOutcome, oid } = msg.data;
+        console.log(msg.data);
+        // Форматируем данные для лога
+        const bestBid = orderBook?.bids?.[0];
+        // const bestAsk = orderBook?.asks?.[0];
+        const asks = orderBook?.asks || [];
+        const lastAsk = asks[asks.length - 1];      // самый дорогой
+        const secondLastAsk = asks[asks.length - 2]; // второй по дороговизне
+        
+        const logLines = [
+          `[📚 Order Book] ${slug}`,
+          `   Winning outcome: ${winningOutcome.name} @ $${winningOutcome.price}`,
+          // `   Best Bid: $${bestBid?.price || 'N/A'} (${bestBid?.size || 0} shares)`,
+          `   Best Ask: $${lastAsk?.price || 'N/A'} (${lastAsk?.size || 0} shares)`,
+          `   Best Ask: $${secondLastAsk?.price || 'N/A'} (${secondLastAsk?.size || 0} shares)`,
+          `   Total Bids: ${orderBook?.bids?.length || 0}, Asks: ${orderBook?.asks?.length || 0}`
+        ];
+        
+        // Добавляем детали в лог
+        if (bestBid && parseFloat(bestBid.price) > 0.99) {
+          logLines.push(`   💰 ARBITRAGE OPPORTUNITY: Bid @ $${bestBid.price} (profit: ${(1 - parseFloat(bestBid.price)) * 100}%)`);
+        }
+        
+        addLog(logLines.join('\n'), 'info');
+        
+        // Также сохраняем в autoBidStatus для отображения под рынком
+        setAutoBidStatus(prev => {
+          // const key = String(oppMap.get(conditionId)?.id || conditionId);
+          const key = String(oid);
+          const current = prev[key] || [];
+          return {
+            ...prev,
+            [key]: [
+              ...current,
+              `   $${lastAsk?.price || 'N/A'} (${lastAsk?.size || 0} shares)`,
+              `   $${secondLastAsk?.price || 'N/A'} (${secondLastAsk?.size || 0} shares)`
+            ]
+          };
+        });
+      }      
+
+      if (msg.type === "full_market_info_response") {
+        if (msg.success) {
+          setMarketInfoModal({
+            conditionId: msg.conditionId,
+            slug: msg.slug,
+            data: msg.data  // ← добавлен ключ "data:"
+          });
+
+        } else {
+          console.error(`❌ Ошибка: ${msg.error}`);
+        }
+      }      
     };
 
     ws.onerror = () => {
@@ -208,6 +277,47 @@ export default function App() {
       ws.close();
     };
   }, [processOpportunities]);
+
+  const [isRestarting, setIsRestarting] = useState(false);
+
+  // рестарт 
+  const restartServer = () => {
+    const token = prompt('⚠️ Введите токен для перезапуска сервера:');
+    
+    if (!token) {
+      addLog('⚠️ Перезапуск отменён', 'warning');
+      return;
+    }
+    
+    fetch('/api/restart-server', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-restart-token': token
+      }
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.success) {
+        addLog('🔄 Сервер перезапускается... Страница обновится через 10 сек', 'warning');
+        setTimeout(() => window.location.reload(), 10000);
+      } else {
+        alert(`❌ Ошибка: ${data.error}`);
+      }
+    })
+    .catch(err => {
+      alert(`❌ Ошибка перезапуска: ${err.message}`);
+    });
+  };
+
+  /**
+   * Открывает новую вкладку с информацией о рынке
+   */
+  const [marketInfoModal, setMarketInfoModal] = useState<{
+    conditionId: string;
+    slug: string;
+    any;
+  } | null>(null); 
 
   const [now, setNow] = useState(Date.now());
 
@@ -360,7 +470,7 @@ export default function App() {
       const endTime = new Date(opp.rawEndDate).getTime();
       if (!endTime) return;
 
-      const intervalMs = 15 * 60 * 1000;
+      const intervalMs = 5 * 60 * 1000;
       const bucketKey = Math.floor(endTime / intervalMs) * intervalMs;
       const bucketTime = new Date(bucketKey).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -488,6 +598,26 @@ export default function App() {
       addLog('❌ Network error while blocking event', 'error');
     }
   };
+
+  const arbitrageEvent = async (conditionId) => {
+    try {
+      const response = await fetch('/api/arbitrage-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conditionId })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        addLog(`✅ Event arbitraging: ${conditionId}`, 'warning');
+        
+      } else {
+        addLog(`❌ Failed to arbitrage event: ${data.message}`, 'error');
+      }
+    } catch (err) {
+      addLog('❌ Network error while arbitrage event', 'error');
+    }
+  };  
 // ==========================================
 
 
@@ -540,6 +670,7 @@ export default function App() {
     
 
   return (
+    
     <div className="min-h-screen bg-slate-900 text-slate-200 p-6 flex flex-col gap-6">
       {/* Header */}
       <header className="flex items-center justify-between border-b border-slate-800 pb-6">
@@ -577,7 +708,7 @@ export default function App() {
             
             <div className="space-y-4">
               <button
-                // onClick={handleStartMonitoring}
+                onClick={restartServer}
                 disabled={loading}
                 className={`w-full py-4 rounded-lg font-bold text-lg flex items-center justify-center gap-3 transition-all transform active:scale-95 ${
                   loading 
@@ -588,12 +719,12 @@ export default function App() {
                 {loading ? (
                   <>
                     <RefreshCw className="animate-spin" /> 
-                    SCANNING API...
+                    RESTARTING...
                   </>
                 ) : (
                   <>
                     <Activity /> 
-                    START MONITORING
+                    RESTART HUSTLER
                   </>
                 )}
               </button>
@@ -874,14 +1005,37 @@ export default function App() {
 
         {/* Right Column: Results Feed */}
         <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden shadow-2xl">
-          <div className="p-4 border-b border-slate-800 bg-slate-800/30 flex justify-between items-center">
-            <h2 className="font-semibold text-slate-300 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
-              Live Opportunities
-            </h2>
-            <span className="text-xs text-slate-500 font-mono">
-              DATA SOURCE: POLYMARKET GAMMA
-            </span>
+          {/* Right Column: Crypto Prices */}
+          <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden shadow-2xl">
+            <div className="p-4 border-b border-slate-800 bg-slate-800/30 flex justify-between items-center">
+              <h2 className="font-semibold text-slate-300 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                Live Opportunities
+              </h2>
+              <span className="text-xs text-slate-500 font-mono">
+                DATA SOURCE: API + WEBSOCKET
+              </span>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {Object.entries(cryptoPrices).map(([symbol, price]) => (
+                  <div
+                    key={symbol}
+                    className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-1 text-center hover:border-indigo-500/30 transition-all"
+                  >
+                    <div className="flex flex-col items-center">
+                      <h3 className="text-sm font-medium text-slate-400 mb-1">
+                        {symbol}
+                      </h3>
+                      <div className="text-xs font-bold text-white mb-2">
+                        {price > 0 ? `$${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -917,14 +1071,25 @@ export default function App() {
                         <span className="text-slate-400 ml-2">
                           {opp.startTime}{" "}
                         </span>                                              
-                        {opp.title} | NegRisk:{" "}
+                        [{opp.marketType}] {opp.title} | NegRisk:{" "} 
                         <span className={opp.negRisk ? "text-yellow-400" : "text-green-400"}>
-                          {opp.negRisk ? 1 : 0}
+                          {opp.negRisk ? 1 : 0} | {opp.id}
                         </span>
-                        <span className={opp.negRisk ? "text-yellow-400" : "text-green-400"}>
-                          | {opp.id}
-                        </span>                        
                       </h3>
+
+                      <button
+                        onClick={() => {
+                          wsRef.current?.send(JSON.stringify({
+                            type: "get_full_market_info",
+                            conditionId: opp.conditionId,
+                            slug: opp.slug
+                          }));
+                        }}
+                        title="Get full market info"
+                        className="text-slate-500 hover:text-blue-400 transition"
+                      >
+                        📋
+                      </button>                      
                       <button
                         onClick={() => {
                           wsRef.current?.send(JSON.stringify({
@@ -936,7 +1101,31 @@ export default function App() {
                         className="text-slate-500 hover:text-indigo-400 transition"
                       >
                         🔄
-                      </button>                      
+                      </button> 
+
+                      <button
+                        onClick={() => {
+                          // 🔑 Находим исход с МАКСИМАЛЬНОЙ ценой (победитель)
+                          const winningOutcome = opp.outcomes.reduce((prev, current) => 
+                            parseFloat(current.price) > parseFloat(prev.price) ? current : prev
+                          );
+                          
+                          wsRef.current?.send(JSON.stringify({
+                            type: "get_order_book",
+                            assetId: winningOutcome.assetId, // ✅ Передаём assetId победителя
+                            slug: opp.slug,
+                            winningOutcome: {
+                              name: winningOutcome.name,
+                              price: winningOutcome.price
+                            },
+                            oid: opp.id
+                          }));
+                        }}
+                        title="Get order book for winning outcome"
+                        className="text-slate-500 hover:text-cyan-400 transition text-lg"
+                      >
+                        📚
+                      </button>                                        
                       <button
                         onClick={() => blockEvent(opp.conditionId)}
                         title="Block event"
@@ -944,7 +1133,13 @@ export default function App() {
                       >
                         ✕
                       </button>
-
+                      <button
+                        onClick={() => arbitrageEvent(opp.conditionId)}
+                        title="Arbitrage event"
+                        className="text-slate-500 hover:text-red-400 transition"
+                      >
+                        ✅
+                      </button>
                     </div>
                
                     <div className="flex flex-col items-end">
@@ -1005,32 +1200,13 @@ export default function App() {
                       </div>
                     )}
 
-                    {/* --- Auto-Bid Input Block --- */}
-                    {!blockedEvents[opp.uuid] ? (
-                    <div className="mt-4 flex flex-col gap-1">
-
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        className="w-24 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200"
-                        value={plannedBets[opp.uuid] ?? ""}
-                        onChange={(e) => handlePlannedBetChange(opp.uuid, e.target.value)}
-                      />
-
-
-                    </div>
-                    ) : (
-                      <div className="text-xs font-mono text-red-400 mt-4">
-                        🚫 Event blocked
-                      </div>
-                    )}                                         
+                                  
                   </div>
                   <div className="text-xs font-mono mt-1 text-yellow-400">
                     {(autoBidStatus[String(opp.id)] || []).map((msg, i) => (
                       <div key={i}>{msg}</div>
                     ))}
-                  </div>  
+                  </div>
                   {/* --- DEBUG: market state --- */}
                   {marketStates[opp.id] && (
                     <pre className="text-xs text-slate-400 bg-slate-900/50 p-2 rounded mt-1 overflow-x-auto">
@@ -1043,7 +1219,18 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      {/* Модальное окно с информацией о рынке */}
+      {marketInfoModal && (
+        <MarketInfo 
+          conditionId={marketInfoModal.conditionId}
+          slug={marketInfoModal.slug}
+          data={marketInfoModal.data}
+          onClose={() => setMarketInfoModal(null)}
+        />
+      )}      
     </div>
+    
   );
 }
 
