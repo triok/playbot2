@@ -18,7 +18,13 @@ export function applyPriceChanges(market, priceChanges, cachedOpportunities, cha
       if (!pc || !pc.best_ask) return o;
 
       touched = true;
-      return { ...o, price: Number(pc.best_ask) };
+      return { 
+        ...o, 
+        price: Number(pc.best_ask),         // price = best_ask
+        size: Number(pc.size || 0),         // Добавляем объем из стакана
+        best_ask: Number(pc.best_ask),      // Явно сохраняем лучший Ask
+        best_bid: Number(pc.best_bid || 0)  // Явно сохраняем лучший Bid
+      };
     });
 
     if (!touched) return opp;

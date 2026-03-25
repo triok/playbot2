@@ -9,28 +9,77 @@ import { cancelOrder } from './cancelOrder.js';
 import { getOrder } from './getOrder.js';
 import { getUserCurrentPositions } from './getUserInfo.js';
 import dotenv from "dotenv";
+import fs from 'fs';
+import path from 'path';              // ← ДОБАВЬТЕ ЭТУ СТРОКУ
 
 dotenv.config();
 
+// =============================================================================
+// Глобальный буфер для хранения тиков
+// =============================================================================
+const marketBuffers = {};
+const FLUSH_THRESHOLD = 60; // Скидывать на диск каждые 60 тиков (1 минута)
+const LOGS_DIR = './data/market_prices';
 
-const BID_SIZE = 6;
-const BID_SIZE_5M = 5;
+// Создаем папку для логов, если её нет
+if (!fs.existsSync(LOGS_DIR)) {
+  fs.mkdirSync(LOGS_DIR, { recursive: true });
+}
+
+// Асинхронная функция для записи на диск (не блокирует процессор)
+function flushBufferToDisk(marketId) {
+  const ticks = marketBuffers[marketId];
+  if (!ticks || ticks.length === 0) return;
+
+  // Формируем JSONL (строки, разделенные переносом)
+  const dataString = ticks.map(t => JSON.stringify(t)).join('\n') + '\n';
+  const filePath = path.join(LOGS_DIR, `${marketId}.jsonl`);
+
+  // Очищаем буфер СРАЗУ, чтобы следующие тики копились с нуля
+  marketBuffers[marketId] =[];
+
+  // Асинхронная запись (добавление в конец файла)
+  fs.appendFile(filePath, dataString, (err) => {
+    if (err) console.error(`[Logger] Ошибка записи лога для ${marketId}:`, err);
+  });
+}
+// =============================================================================
+// Глобальный буфер для хранения тиков
+// =============================================================================
+
+
+const ENTRY_BID_SIZE = 20; // при тесте, изменить в getOrder
+// const ENTRY_PRICE = 0.34;
+const ENTRY_PRICE = 0.42;
+// const ENTRY_PRICE = 0.32;
+
+const HEDGE50_PROFIT_PERCENT = 0.01; // желаемый процент
+
+// норм если убрать заход ниже 0.30
+// const TIME_ENTER_FROM = 510;
+// const TIME_ENTER_TO = 785;
+
+const TIME_ENTER_FROM = 510;
+const TIME_ENTER_TO = 900;
+
+// const TIME_ENTER_FROM = 220;
+// const TIME_ENTER_TO = 300;
+
+const PROFIT_PERCENT = 0.05; // желаемый процент при risk free
+
+const ARBITRAGE_PROFIT_PERCENT = 0.85; // желаемый процент для арбитражных ордеров
 
 export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, executeSpreadTrade, client, placeTestOrder, placeArbitrageOrder }) {
 
     let timer = null;
     const state = new Map();      // marketId → stage ('idle', 'tracking', 'armed', 'bidding')
     const outcomeStages = new Map();
-    let fiveMinuteMarketCounter = 0;
     const latestCryptoPrices = {
       btcusdt: null,
       ethusdt: null,
       solusdt: null,
       xrpusdt: null
     };
-    const arbitrageAllowed = new Set(); // conditionId маркета разрешён к арбитражу
-    const arbitrageTracked = new Set(); // conditionId маркета уже начали отслеживать    
-
 
     function start(getOpportunities) {
         if (timer) return;
@@ -40,948 +89,6 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
             latestCryptoPrices[symbol] = value;
           }
         });      
-        eventBus.on('marketUpdated', async (marketId) => {
-            
-          const opp = getOpportunities().find(o => o.conditionId === marketId);
-          if (!opp) return;
-
-          if (!getAutoBidState()) return; // если бот выключен
-          if (isBotDisabledNow()) {
-            return; // не входим в новую позицию. Выключен по времени
-          }
-          const now = Date.now();
-          const secondsLeft = Math.floor((new Date(opp.rawEndDate) - now) / 1000); 
-          const stage = state.get(opp.id);
-          const symbol = getSymbolFromKeyword(opp.keyword);
-          const currentPrice = getPrice(symbol);
-
-          // ================================================
-          // 15м маркеты
-          // ================================================
-
-          if (secondsLeft > 0 && opp.marketType == '15M') {
-            // 🔐 Получаем ранее выбранный исход (если есть)
-            let marketChosen = state.get(`${opp.id}:chosenOutcome`) || null;
-            let targetOutcome = null;
-          
-            // Если исход ещё не выбран — ищем его по условию price >= 0.98
-            if (!marketChosen) {
-              for (const outcome of opp.outcomes) {
-                if (outcome.price >= 0.98) {
-                  const key = `${opp.id}:${outcome.assetId}`;
-                  state.set(`${opp.id}:chosenOutcome`, key);
-                  marketChosen = key;
-                  targetOutcome = outcome;
-                  break;
-                }
-              }
-            } else {
-              const [, assetId] = marketChosen.split(':');
-              targetOutcome = opp.outcomes.find(o => o.assetId === assetId);
-            }
-
-            // Если нет подходящего исхода — выходим
-            if (!targetOutcome || targetOutcome.price < 0.98) {
-              return;
-            }
-
-            // 📌 Читаем текущее состояние outcome1 (объект с stage1/stage2/stage3)
-            const currentOutcomeState = state.get(`${opp.id}:outcome1`) || {};
-
-            const currentOutcomeState2 = state.get(`${opp.id}:outcome2`) || {};
-
-            const threshold = priceThresholds[symbol] || 1;
-
-            const priceToBet = opp.priceToBet  || {};
-            const priceDifference = priceToBet ? Math.abs(currentPrice - priceToBet) : 0;
-            const priceDifferenceRaw = priceToBet ? currentPrice - priceToBet : 0; 
-
-            // 🔹 Стадия -1: >=200 < secondsLeft < 230
-            if (secondsLeft >= 200 && secondsLeft < 230 && !currentOutcomeState2.stage01 && priceToBet && priceDifference > threshold*2) {
-              const logText = `[${nowTime()}] ${targetOutcome.name} = ${targetOutcome.price.toFixed(3)} (Stage -1: <200-230s) - ${currentPrice} [${priceDifferenceRaw}]`;
-              pushMarketLog(opp.id, logText);
-              onSignal?.({ type: 'bidding', opp, text: logText });
-
-              // Сохраняем stage01 в outcome2
-              const updatedState2 = {
-                ...currentOutcomeState2,
-                stage01: {
-                  value: targetOutcome.name,
-                  price: targetOutcome.price,
-                  time: nowTime(),
-                  priceDifference: priceDifference,
-                  secondsLeft: secondsLeft
-                }
-              };
-              state.set(`${opp.id}:outcome2`, updatedState2);
-              updateMarketState(opp.id, { outcome2: updatedState2 });
-
-      
-            }
-            // 🔹 Стадия 0: >=190 < secondsLeft < 198
-            if (secondsLeft >= 190 && secondsLeft < 198 && !currentOutcomeState2.stage0) {
-              const logText = `[${nowTime()}] ${targetOutcome.name} = ${targetOutcome.price.toFixed(3)} (Stage 0: <190-198s) - ${currentPrice} [${priceDifferenceRaw}]`;
-              pushMarketLog(opp.id, logText);
-              onSignal?.({ type: 'bidding', opp, text: logText });
-
-              // Сохраняем stage0 в outcome2
-              const updatedState2 = {
-                ...currentOutcomeState2,
-                stage0: {
-                  value: targetOutcome.name,
-                  price: targetOutcome.price,
-                  time: nowTime(),
-                  priceDifference: priceDifference,
-                  secondsLeft: secondsLeft
-                }
-              };
-              state.set(`${opp.id}:outcome2`, updatedState2);
-              updateMarketState(opp.id, { outcome2: updatedState2 });
-
-      
-            }
-            // 🔹 Стадия 1: 0 < secondsLeft < 170
-            if (secondsLeft >= 175 && secondsLeft < 185 && !currentOutcomeState.stage1) {
-              
-              const logText = `[${nowTime()}] ${targetOutcome.name} = ${targetOutcome.price.toFixed(3)} (Stage 1: <170s) - ${currentPrice} [${priceDifferenceRaw}]`;
-              pushMarketLog(opp.id, logText);
-              pushTechnicalLog(opp.conditionId, `[${nowTime()}] ${targetOutcome.name} = ${targetOutcome.price.toFixed(3)} (Stage 1: <170s)`, 'autobidbot_stage');
-              onSignal?.({ type: 'bidding', opp, text: logText });
-
-              // Сохраняем stage1 в outcome1
-              const updatedState = {
-                ...currentOutcomeState,
-                stage1: {
-                  value: targetOutcome.name,
-                  price: targetOutcome.price,
-                  time: nowTime(),
-                  priceDifference: priceDifference,
-                  secondsLeft: secondsLeft
-                }
-              };
-              state.set(`${opp.id}:outcome1`, updatedState);
-              updateMarketState(opp.id, { outcome1: updatedState });
-
-              // Сохраняем stage1 в outcome2
-              const updatedState2 = {
-                ...currentOutcomeState2,
-                stage1: {
-                  value: targetOutcome.name,
-                  time: nowTime(),
-                  secondsLeft: secondsLeft
-                }
-              };    
-              state.set(`${opp.id}:outcome2`, updatedState2); 
-              updateMarketState(opp.id, { outcome2: updatedState2 });        
-            }
-
-            // 🔹 Стадия 2: 0 < secondsLeft < 120 — но ТОЛЬКО если stage1 уже есть
-            if (secondsLeft >= 117 && secondsLeft < 120) {
-              if (!currentOutcomeState2.stage1) {
-                // ❌ Stage 1 не пройдена — НЕЛЬЗЯ переходить к Stage 2
-                // console.warn(`[BOT] ⛔ Stage 2 blocked: Stage 1 not completed for ${opp.id}`);
-                // const logText = `[${nowTime()}] [BOT] ⛔ Stage 2 blocked: Stage 1 not completed for ${opp.id}`;
-                // pushMarketLog(opp.id, logText);                  
-                // return; // 💥 Останавливаем ВСЁ
-                if (!state.get(`${opp.id}:stage2_blocked_logged`)) {
-                  const logText = `[${nowTime()}] [BOT] ⛔ Stage 2 blocked: Stage 1 not completed for ${opp.id} | Market skipped`;
-                  pushMarketLog(opp.id, logText);
-                  onSignal?.({ type: 'bidding', opp, text: logText });
-                  
-                  // Устанавливаем флаг, чтобы больше не логировать
-                  state.set(`${opp.id}:stage2_blocked_logged`, true);
-
-                }                
-              } else if (!currentOutcomeState2.stage2) {
-                const logText = `[${nowTime()}] ${targetOutcome.name} = ${targetOutcome.price.toFixed(3)} (Stage 2: <120s) - ${currentPrice} [${priceDifferenceRaw}]`;
-                pushMarketLog(opp.id, logText);
-                pushTechnicalLog(opp.conditionId, `[${nowTime()}] ${targetOutcome.name} = ${targetOutcome.price.toFixed(3)} (Stage 2: <120s)`, 'autobidbot_stage');
-                onSignal?.({ type: 'bidding', opp, text: logText });
-
-                const updatedState2 = {
-                  ...currentOutcomeState2,
-
-                  stage2: {
-                    value: targetOutcome.name,
-                    time: nowTime(),
-                    secondsLeft: secondsLeft
-                  }
-                };
-                state.set(`${opp.id}:outcome2`, updatedState2);
-                updateMarketState(opp.id, { outcome2: updatedState2 });
-              }
-            }
-
-            // 🔹 Стадия 3: 0 < secondsLeft < 40 — но ТОЛЬКО если stage2 уже есть
-            // было 37 - 40
-            if (secondsLeft >= 25 && secondsLeft < 30) {
-              // const threshold0999 = priceThresholds0999[symbol] || 1;
-              if (!currentOutcomeState2.stage2) {
-                // ❌ Stage 2 не пройдена — НЕЛЬЗЯ переходить к Stage 3
-                // console.warn(`[BOT] ⛔ Stage 3 blocked: Stage 2 not completed for ${opp.id}`);
-                return; // 💥 Останавливаем ВСЁ
-              } else if (!currentOutcomeState2.stage3) {
-                const logText = `[${nowTime()}] ${targetOutcome.name} = ${targetOutcome.price.toFixed(3)} (Stage 3: <40s) - ${currentPrice} [${priceDifferenceRaw}]`;
-                pushMarketLog(opp.id, logText);
-                pushTechnicalLog(opp.conditionId, `[${nowTime()}] ${targetOutcome.name} = ${targetOutcome.price.toFixed(3)} (Stage 3: <40s)`, 'autobidbot_stage');
-                onSignal?.({ type: 'bidding', opp, text: logText });
-
-                const updatedState2 = {
-                  ...currentOutcomeState2,
-                  stage3: {
-                    value: targetOutcome.name,
-                    time: nowTime(),
-                    secondsLeft: secondsLeft
-                  }
-                };
-                state.set(`${opp.id}:outcome2`, updatedState2);
-                updateMarketState(opp.id, { outcome2: updatedState2 });
-              }
-            }
-
-            // 🔹 Финальная проверка: 10 ≤ secondsLeft < 15 и все стадии пройдены
-            // было 33 - 37 в основном срабатывает 0.999
-            // было 38 - 44 в основном срабатывает 0.999
-            if (
-              // secondsLeft >= 150 && // хорошо
-              // secondsLeft < 154 && // хорошо
-              // secondsLeft >= 157 && // хорошо 
-              // secondsLeft < 164 && // хорошо  
-              secondsLeft >= 157 && 
-              secondsLeft < 175 &&                     
-              currentOutcomeState.stage1 &&   
-              // currentOutcomeState.stage2 && 
-              // currentOutcomeState.stage3 &&
-              priceToBet &&  // priceToBet не пустой
-              priceDifference > threshold &&  // разница больше установленной              
-              !state.get(`${opp.id}:final_logged`)
-            ) {
-              // Используем ТОТ ЖЕ САМЫЙ исход, что и на Stage 1
-              const finalOutcome = targetOutcome;
-
-              if (finalOutcome && opp.negRisk == false) {
-                // Защита от повторной записи
-                state.set(`${opp.id}:final_logged`, true);
-                const logText = `[${nowTime()}] START BIDDING: "${finalOutcome.name}" at ${secondsLeft}s - ${currentPrice}`;
-                pushMarketLog(opp.id, logText);
-                pushTechnicalLog(opp.conditionId, `[${nowTime()}] START BIDDING: "${finalOutcome.name}" for ${finalOutcome.price} at ${secondsLeft}s`, 'autobidbot_stage');
-                onSignal?.({ type: 'bidding', opp, text: logText });
-                if(opp.marketType == 'soccer')return; // запрет на спорт рынки
-                let bid_price = finalOutcome.price;
-
-                if(finalOutcome.price > 0.99){
-                  bid_price = 0.99;
-                }                                
-                try {
-                  let tickSize = getTickSizeForOrder(opp, finalOutcome.assetId);
-                  // let tickSize = '0.01'
-                  let order_expiration = parseInt(((new Date().getTime() + 60 * 1000 + 10 * 1000) / 1000).toString());
-
-                  console.log(order_expiration);
-                  const buy = await placeTestOrder({
-                    tokenID: finalOutcome.assetId,
-                    price: bid_price,
-                    side: "BUY",
-                    size: BID_SIZE,                    
-                    orderPriceMinTickSize: tickSize,
-                    expiration: order_expiration,
-                    order_type: "GTD"
-                    // negRisk: opp.negRisk,
-                    // OrderType: "GTC",
-                    // orderType: "GTD",
-                  });
-            
-                  console.log(`[PlaceOrder] ✅ Ответ от placeTestOrder:`, buy);
-                  pushTechnicalLog(opp.conditionId, {
-                    message: `[${nowTime()}] Ответ от placeTestOrder`,
-                    status: buy.status,
-                    success: buy.success,
-                    orderId: buy.orderID,
-                    price: bid_price,
-                    size: BID_SIZE,
-                    takingAmount: buy.takingAmount,
-                    makingAmount: buy.makingAmount,
-                    errorMsg: buy.errorMsg,
-                    orderPriceMinTickSize: tickSize
-                  }, 'autobidbot_buy');
-                  // 🔹 Проверяем, есть ли orderId (успех)
-                  if (buy?.orderID) {
-                    const logText = `[${nowTime()}] Order opened: ${buy.orderID}`;
-                    pushMarketLog(opp.id, logText);
-                    onSignal?.({ type: 'bidding', opp, text: logText });                    
-                    // ✅ Успешное размещение
-                    updateMarketState(opp.id, {
-                      outcome1: {
-                        value: finalOutcome.name,
-                        status: "order_placed",
-                        time: nowTime()
-                      }
-                    });
-                    // 🔥 ПРОСТАЯ ЗАПИСЬ ОРДЕРА В ФАЙЛ
-                    saveOrder({
-                      orderId: buy.orderID,
-                      assetId: finalOutcome.assetId,
-                      outcome: finalOutcome.name,
-                      side: "BUY",
-                      price: bid_price,
-                      size: BID_SIZE,
-                      tickSize: tickSize
-                    });                 
-                  } else {
-                    const logText = `[${nowTime()}] ❌ No order ID`;
-                    pushMarketLog(opp.id, logText);
-                    pushTechnicalLog(opp.conditionId, {
-                      type: 'autobidbot_buy',
-                      error: buy?.error || "Unknown error"
-                    }, 'autobidbot_buy');
-                    onSignal?.({ type: 'bidding', opp, text: logText });                    
-                    // ❌ Неудача — но ответ пришёл
-                    updateMarketState(opp.id, {
-                      outcome1: {
-                        value: finalOutcome.name,
-                        status: "order_failed",
-                        error: buy?.error || "Unknown error",
-                        time: nowTime()
-                      }
-                    });
-                  }
-                
-                } catch (error) {
-                  console.log(opp.slug);
-                  console.error(`[WS Handler] 💥 Ошибка при размещении ордера:`, error.message);
-                  const logText = `[${nowTime()}] ❌ Error (console)`;
-                  pushMarketLog(opp.id, logText);
-                  onSignal?.({ type: 'bidding', opp, text: logText });                   
-                  // ❌ Исключение — ордер не размещён
-                  updateMarketState(opp.id, {
-                    outcome1: {
-                      value: finalOutcome.name,
-                      status: "order_error",
-                      error: error.message,
-                      time: nowTime()
-                    }
-                  });
-                  
-                }
-
-                
-                
-              }
-            }      
-            
-            // ставка 0.999
-            // if(secondsLeft >= 0 && 
-            //   secondsLeft < 15 && 
-            //   currentOutcomeState2.stage2 && 
-            //   currentOutcomeState2.stage3 &&
-            //   !state.get(`${opp.id}:0999_logged`)
-            // ){
-            //   state.set(`${opp.id}:final_logged`, true);
-            //   state.set(`${opp.id}:0999_logged`, true);
-            //   const finalOutcome = targetOutcome;
-            //   if (!finalOutcome) {
-            //     console.error("❌ No valid outcome");
-            //     return;
-            //   }
-            //   const logText = `[${nowTime()}] START BIDDING 0999: "${finalOutcome.name}" at ${secondsLeft}s - ${currentPrice}`;
-            //   pushMarketLog(opp.id, logText);
-            //   pushTechnicalLog(opp.conditionId, `[${nowTime()}] START BIDDING 0999: "${finalOutcome.name}" for ${finalOutcome.price} at ${secondsLeft}s`, 'autobidbot_stage');
-            //   onSignal?.({ type: 'bidding', opp, text: logText });
-            //   if(opp.marketType == 'soccer')return; // запрет на спорт рынки
-            //   let bid_price = finalOutcome.price;
-            //   let tickSize = "0.001";
-            //   if(finalOutcome.price > 0.999){
-            //     bid_price = 0.999;
-            //   }  
-            //   let order_expiration = parseInt(((new Date().getTime() + 60 * 1000 + 10 * 1000) / 1000).toString());  
-            //   const buy = await placeTestOrder({
-            //     tokenID: finalOutcome.assetId,
-            //     price: bid_price,
-            //     side: "BUY",
-            //     size: BID_SIZE,                    
-            //     orderPriceMinTickSize: tickSize,
-            //     expiration: order_expiration,
-            //     order_type: "GTC"
-            //   });
-        
-            //   console.log(`[PlaceOrder] ✅ Ответ от placeTestOrder:`, buy);
-            //   pushTechnicalLog(opp.conditionId, {
-            //     message: `[${nowTime()}] Ответ от placeTestOrder`,
-            //     status: buy.status,
-            //     success: buy.success,
-            //     orderId: buy.orderID,
-            //     price: bid_price,
-            //     size: BID_SIZE,
-            //     takingAmount: buy.takingAmount,
-            //     makingAmount: buy.makingAmount,
-            //     errorMsg: buy.errorMsg,
-            //     orderPriceMinTickSize: tickSize
-            //   }, 'autobidbot_buy');
-
-
-            // }
-          }
-
-          // ================================================
-          // ================================================ 
-
-          // ================================================
-          // 1H маркеты
-          // ================================================
-
-          if (secondsLeft > 0 && opp.marketType == '1H') {
-            // 🔐 Получаем ранее выбранный исход (если есть)
-            let marketChosen = state.get(`${opp.id}:chosenOutcome`) || null;
-            let targetOutcome = null;
-          
-            // Если исход ещё не выбран — ищем его по условию price >= 0.98
-            if (!marketChosen) {
-              for (const outcome of opp.outcomes) {
-                if (outcome.price >= 0.98) {
-                  const key = `${opp.id}:${outcome.assetId}`;
-                  state.set(`${opp.id}:chosenOutcome`, key);
-                  marketChosen = key;
-                  targetOutcome = outcome;
-                  break;
-                }
-              }
-            } else {
-              const [, assetId] = marketChosen.split(':');
-              targetOutcome = opp.outcomes.find(o => o.assetId === assetId);
-            }
-
-            // Если нет подходящего исхода — выходим
-            if (!targetOutcome || targetOutcome.price < 0.98) {
-              return;
-            }
-
-            // 📌 Читаем текущее состояние outcome1 (объект с stage1/stage2/stage3)
-            const currentOutcomeState = state.get(`${opp.id}:outcome1`) || {};
-
-            const currentOutcomeState2 = state.get(`${opp.id}:outcome2`) || {};
-
-            const threshold = priceThresholds[symbol] || 1;
-
-            const priceToBet = opp.priceToBet  || {};
-            const priceDifference = priceToBet ? Math.abs(currentPrice - priceToBet) : 0;
-            const priceDifferenceRaw = priceToBet ? currentPrice - priceToBet : 0;
-
-            // 🔹 Стадия 1: 0 < secondsLeft < 170
-            if (secondsLeft >= 165 && secondsLeft < 170 && !currentOutcomeState.stage1) {
-              const logText = `[${nowTime()}] ${targetOutcome.name} = ${targetOutcome.price.toFixed(3)} (Stage 1: <170s) - ${currentPrice} [${priceDifferenceRaw}]`;
-              pushMarketLog(opp.id, logText);
-              pushTechnicalLog(opp.conditionId, `[${nowTime()}] ${targetOutcome.name} = ${targetOutcome.price.toFixed(3)} (Stage 1: <170s)`, 'autobidbot_stage');
-              onSignal?.({ type: 'bidding', opp, text: logText });
-
-              // Сохраняем stage1 в outcome1
-              const updatedState = {
-                ...currentOutcomeState,
-                stage1: {
-                  value: targetOutcome.name,
-                  time: nowTime(),
-                  secondsLeft: secondsLeft
-                }
-              };
-              state.set(`${opp.id}:outcome1`, updatedState);
-              updateMarketState(opp.id, { outcome1: updatedState });
-
-              // Сохраняем stage1 в outcome2
-              const updatedState2 = {
-                ...currentOutcomeState2,
-                stage1: {
-                  value: targetOutcome.name,
-                  time: nowTime(),
-                  secondsLeft: secondsLeft
-                }
-              };    
-              state.set(`${opp.id}:outcome2`, updatedState2); 
-              updateMarketState(opp.id, { outcome2: updatedState2 });        
-            }
-
-            // 🔹 Стадия 2: 0 < secondsLeft < 120 — но ТОЛЬКО если stage1 уже есть
-            if (secondsLeft >= 117 && secondsLeft < 120) {
-              if (!currentOutcomeState2.stage1) {
-                // ❌ Stage 1 не пройдена — НЕЛЬЗЯ переходить к Stage 2
-                // console.warn(`[BOT] ⛔ Stage 2 blocked: Stage 1 not completed for ${opp.id}`);
-
-                if (!state.get(`${opp.id}:stage2_blocked_logged`)) {
-                  const logText = `[${nowTime()}] [BOT] ⛔ Stage 2 blocked: Stage 1 not completed for ${opp.id} | Market skipped`;
-                  pushMarketLog(opp.id, logText);
-                  onSignal?.({ type: 'bidding', opp, text: logText });
-                  
-                  // Устанавливаем флаг, чтобы больше не логировать
-                  state.set(`${opp.id}:stage2_blocked_logged`, true);
-
-                }                
-                // return; // 💥 Останавливаем ВСЁ
-              } else if (!currentOutcomeState2.stage2) {
-                const logText = `[${nowTime()}] ${targetOutcome.name} = ${targetOutcome.price.toFixed(3)} (Stage 2: <120s) - ${currentPrice} [${priceDifferenceRaw}]`;
-                pushMarketLog(opp.id, logText);
-                pushTechnicalLog(opp.conditionId, `[${nowTime()}] ${targetOutcome.name} = ${targetOutcome.price.toFixed(3)} (Stage 2: <120s)`, 'autobidbot_stage');
-                onSignal?.({ type: 'bidding', opp, text: logText });
-
-                const updatedState2 = {
-                  ...currentOutcomeState2,
-                  stage2: {
-                    value: targetOutcome.name,
-                    time: nowTime(),
-                    secondsLeft: secondsLeft
-                  }
-                };
-                state.set(`${opp.id}:outcome2`, updatedState2);
-                updateMarketState(opp.id, { outcome2: updatedState2 });
-              }
-            }
-
-            // 🔹 Стадия 3: 0 < secondsLeft < 40 — но ТОЛЬКО если stage2 уже есть
-            // было 37 - 40
-            if (secondsLeft >= 45 && secondsLeft < 55) {
-              if (!currentOutcomeState2.stage2) {
-                // ❌ Stage 2 не пройдена — НЕЛЬЗЯ переходить к Stage 3
-                // console.warn(`[BOT] ⛔ Stage 3 blocked: Stage 2 not completed for ${opp.id}`);
-                // return; // 💥 Останавливаем ВСЁ
-              } else if (!currentOutcomeState2.stage3) {
-                const logText = `[${nowTime()}] ${targetOutcome.name} = ${targetOutcome.price.toFixed(3)} (Stage 3: <40s) - ${currentPrice} [${priceDifferenceRaw}]`;
-                pushMarketLog(opp.id, logText);
-                pushTechnicalLog(opp.conditionId, `[${nowTime()}] ${targetOutcome.name} = ${targetOutcome.price.toFixed(3)} (Stage 3: <40s)`, 'autobidbot_stage');
-                onSignal?.({ type: 'bidding', opp, text: logText });
-
-                const updatedState2 = {
-                  ...currentOutcomeState2,
-                  stage3: {
-                    value: targetOutcome.name,
-                    time: nowTime(),
-                    secondsLeft: secondsLeft
-                  }
-                };
-                state.set(`${opp.id}:outcome2`, updatedState2);
-                updateMarketState(opp.id, { outcome2: updatedState2 });
-              }
-            }
-
-
-            // 🔹 Финальная проверка: 10 ≤ secondsLeft < 15 и все стадии пройдены
-            if (
-              // secondsLeft >= 150 && // хорошо
-              // secondsLeft < 154 && // хорошо
-              // secondsLeft >= 157 && // хорошо 
-              // secondsLeft < 164 && // хорошо  
-              secondsLeft >= 35 && 
-              secondsLeft < 44 &&                     
-              currentOutcomeState.stage1 &&   
-              currentOutcomeState2.stage2 && 
-              currentOutcomeState2.stage3 &&
-              priceToBet &&  // priceToBet не пустой
-              priceDifference > threshold &&  // разница больше установленной
-              !state.get(`${opp.id}:final_logged`)
-            ) {
-              // Используем ТОТ ЖЕ САМЫЙ исход, что и на Stage 1
-              const finalOutcome = targetOutcome;
-              const logText = `[${nowTime()}] Ready to BIDDING: "${finalOutcome.name}" at ${secondsLeft}s - ${currentPrice}`;
-              pushMarketLog(opp.id, logText);
-              if (finalOutcome && opp.negRisk == false) {
-                // Защита от повторной записи
-                state.set(`${opp.id}:final_logged`, true);
-                const logText = `[${nowTime()}] START BIDDING: "${finalOutcome.name}" at ${secondsLeft}s - ${currentPrice}`;
-                pushMarketLog(opp.id, logText);
-                pushTechnicalLog(opp.conditionId, `[${nowTime()}] START BIDDING: "${finalOutcome.name}" for ${finalOutcome.price} at ${secondsLeft}s`, 'autobidbot_stage');
-                onSignal?.({ type: 'bidding', opp, text: logText });
-                if(opp.marketType == 'soccer')return; // запрет на спорт рынки
-                let bid_price = finalOutcome.price;
-
-                if(finalOutcome.price > 0.99){
-                  bid_price = 0.99;
-                }                                
-                try {
-                  // let tickSize = getTickSizeForOrder(opp, finalOutcome.assetId);
-                  let tickSize = '0.001'
-                  let order_expiration = parseInt(((new Date().getTime() + 60 * 1000 + 10 * 1000) / 1000).toString());
-
-                  console.log(order_expiration);
-                  const buy = await placeTestOrder({
-                    tokenID: finalOutcome.assetId,
-                    price: bid_price,
-                    side: "BUY",
-                    size: BID_SIZE,                    
-                    orderPriceMinTickSize: tickSize,
-                    expiration: order_expiration,
-                    order_type: "GTD"
-                  });
-            
-                  console.log(`[PlaceOrder] ✅ Ответ от placeTestOrder:`, buy);
-                  pushTechnicalLog(opp.conditionId, {
-                    message: `[${nowTime()}] Ответ от placeTestOrder`,
-                    status: buy.status,
-                    success: buy.success,
-                    orderId: buy.orderID,
-                    price: bid_price,
-                    size: BID_SIZE,
-                    takingAmount: buy.takingAmount,
-                    makingAmount: buy.makingAmount,
-                    errorMsg: buy.errorMsg,
-                    orderPriceMinTickSize: tickSize
-                  }, 'autobidbot_buy');
-                  // 🔹 Проверяем, есть ли orderId (успех)
-                  if (buy?.orderID) {
-                    const logText = `[${nowTime()}] Order opened: ${buy.orderID}`;
-                    pushMarketLog(opp.id, logText);
-                    onSignal?.({ type: 'bidding', opp, text: logText });                    
-                    // ✅ Успешное размещение
-                    updateMarketState(opp.id, {
-                      outcome1: {
-                        value: finalOutcome.name,
-                        status: "order_placed",
-                        time: nowTime()
-                      }
-                    });
-                    // 🔥 ПРОСТАЯ ЗАПИСЬ ОРДЕРА В ФАЙЛ
-                    saveOrder({
-                      orderId: buy.orderID,
-                      assetId: finalOutcome.assetId,
-                      outcome: finalOutcome.name,
-                      side: "BUY",
-                      price: bid_price,
-                      size: BID_SIZE,
-                      tickSize: tickSize
-                    });                 
-                  } else {
-                    const logText = `[${nowTime()}] ❌ No order ID`;
-                    pushMarketLog(opp.id, logText);
-                    pushTechnicalLog(opp.conditionId, {
-                      type: 'autobidbot_buy',
-                      error: buy?.error || "Unknown error"
-                    }, 'autobidbot_buy');
-                    onSignal?.({ type: 'bidding', opp, text: logText });                    
-                    // ❌ Неудача — но ответ пришёл
-                    updateMarketState(opp.id, {
-                      outcome1: {
-                        value: finalOutcome.name,
-                        status: "order_failed",
-                        error: buy?.error || "Unknown error",
-                        time: nowTime()
-                      }
-                    });
-                  }
-                
-                } catch (error) {
-                  console.log(opp.slug);
-                  console.error(`[WS Handler] 💥 Ошибка при размещении ордера:`, error.message);
-                  const logText = `[${nowTime()}] ❌ Error (console)`;
-                  pushMarketLog(opp.id, logText);
-                  onSignal?.({ type: 'bidding', opp, text: logText });                   
-                  // ❌ Исключение — ордер не размещён
-                  updateMarketState(opp.id, {
-                    outcome1: {
-                      value: finalOutcome.name,
-                      status: "order_error",
-                      error: error.message,
-                      time: nowTime()
-                    }
-                  });
-                  
-                }
-
-                
-                
-              }
-            }            
-          }          
-
-          // ================================================
-          // ================================================ 
-
-          // ================================================
-          // 5 min
-          // ================================================
-
-          if (secondsLeft > 0 && opp.marketType == '5M') {
-            // 🔐 Получаем ранее выбранный исход (если есть)
-            let marketChosen2 = state.get(`${opp.id}:chosenOutcome2`) || null;
-            let targetOutcome2 = null;
-          
-            // Если исход ещё не выбран — ищем его по условию price >= 0.96
-            if (!marketChosen2) {
-              for (const outcome of opp.outcomes) {
-                if (outcome.price >= 0.96) {
-                  const key = `${opp.id}:${outcome.assetId}`;
-                  state.set(`${opp.id}:chosenOutcome2`, key);
-                  marketChosen2 = key;
-                  targetOutcome2 = outcome;
-                  break;
-                }
-              }
-            } else {
-              const [, assetId] = marketChosen2.split(':');
-              targetOutcome2 = opp.outcomes.find(o => o.assetId === assetId);
-            }
-
-            // Если нет подходящего исхода — выходим
-            if (!targetOutcome2 || targetOutcome2.price < 0.96) {
-              return;
-            }
-
-            // 📌 Читаем текущее состояние outcome1 (объект с stage1/stage2/stage3)
-            const currentOutcomeState3 = state.get(`${opp.id}:outcome3`) || {};
-            const threshold = priceThresholds[symbol] || 1;
-
-            const priceToBet = opp.priceToBet  || {};
-            const priceDifference = priceToBet ? Math.trunc(Math.abs(currentPrice - priceToBet)) : 0;
-            const priceDifferenceRaw = priceToBet ? Math.trunc(currentPrice - priceToBet) : 0;
-
-
-            // 🔹 Стадия 1: >=45 < secondsLeft < 50
-            if (secondsLeft >= 45 && secondsLeft < 50 && !currentOutcomeState3.stage1) {
-              const logText = `[${nowTime()}] ${targetOutcome2.name} = ${targetOutcome2.price.toFixed(3)} (Stage 1 (2): <45-50s) - ${currentPrice} [${priceDifferenceRaw}]`;
-              pushMarketLog(opp.id, logText);
-              onSignal?.({ type: 'bidding', opp, text: logText });
-
-              // Сохраняем stage1 в outcome1
-              const updatedState3 = {
-                ...currentOutcomeState3,
-                stage1: {
-                  value: targetOutcome2.name,
-                  price: targetOutcome2.price,
-                  time: nowTime(),
-                  priceDifference: priceDifference,
-                  secondsLeft: secondsLeft
-                }
-              };
-              state.set(`${opp.id}:outcome3`, updatedState3);
-              updateMarketState(opp.id, { outcome3: updatedState3 });
-
-      
-            }
-
-            // 🔹 Стадия 2: 30 - 35 — но ТОЛЬКО если stage1 уже есть
-            if (secondsLeft >= 30 && secondsLeft < 35) {
-              if (!currentOutcomeState3.stage1) {
-                // ❌ Stage 1 не пройдена — НЕЛЬЗЯ переходить к Stage 2
-                if (!state.get(`${opp.id}:stage2_blocked_logged`)) {
-                  const logText = `[${nowTime()}] [BOT] ⛔ Stage 2 blocked: Stage 1 not completed for ${opp.id} | Market skipped`;
-                  pushMarketLog(opp.id, logText);
-                  onSignal?.({ type: 'bidding', opp, text: logText });
-                  
-                  // Устанавливаем флаг, чтобы больше не логировать
-                  state.set(`${opp.id}:stage2_blocked_logged`, true);
-
-                }
-              } else if (!currentOutcomeState3.stage2) {
-                const logText = `[${nowTime()}] ${targetOutcome2.name} = ${targetOutcome2.price.toFixed(3)} (Stage 2 (2): <30-35s) - ${currentPrice}  [${priceDifferenceRaw}]`;
-                pushMarketLog(opp.id, logText);
-                onSignal?.({ type: 'bidding', opp, text: logText });
-
-                const updatedState3 = {
-                  ...currentOutcomeState3,
-                  stage2: {
-                    value: targetOutcome2.name,
-                    price: targetOutcome2.price,
-                    time: nowTime(),
-                    priceDifference: priceDifference,
-                    secondsLeft: secondsLeft
-                  }
-                };
-                state.set(`${opp.id}:outcome3`, updatedState3);
-                updateMarketState(opp.id, { outcome3: updatedState3 });
-              }
-            }
-
-            // 🔹 Стадия 3: 15 - 20 — но ТОЛЬКО если stage2 уже есть
-            if (secondsLeft >= 15 && secondsLeft < 20) {
-              if (!currentOutcomeState3.stage2) {
-                // ❌ Stage 2 не пройдена — НЕЛЬЗЯ переходить к Stage 3
-                // console.warn(`[BOT] ⛔ Stage 3 blocked: Stage 2 not completed for ${opp.id}`);
-              } else if (!currentOutcomeState3.stage3) {
-                const logText = `[${nowTime()}] ${targetOutcome2.name} = ${targetOutcome2.price.toFixed(3)} (Stage 3 (2): <15-20s) - ${currentPrice}  [${priceDifferenceRaw}]`;
-                pushMarketLog(opp.id, logText);
-                onSignal?.({ type: 'bidding', opp, text: logText });
-
-                const updatedState3 = {
-                  ...currentOutcomeState3,
-                  stage3: {
-                    value: targetOutcome2.name,
-                    price: targetOutcome2.price,
-                    time: nowTime(),
-                    priceDifference: priceDifference,
-                    secondsLeft: secondsLeft
-                  }
-                };
-                state.set(`${opp.id}:outcome3`, updatedState3);
-                updateMarketState(opp.id, { outcome3: updatedState3 });
-              }
-            }
-
-            const isTrendValid = currentOutcomeState3.stage2?.priceDifference >= currentOutcomeState3.stage1?.priceDifference * 0.95;
-
-            // // 🔑 Дополнительно: если разница растёт — всегда разрешаем
-            const isTrendGrowing = currentOutcomeState3.stage2?.priceDifference >= currentOutcomeState3.stage1?.priceDifference;
-            
-            // if (!isTrendValid && !state.get(`${opp.id}:trend_check_failed_logged`)) {
-            //   const stage1Diff = currentOutcomeState3.stage1?.priceDifference || 0;
-            //   const stage2Diff = currentOutcomeState3.stage2?.priceDifference || 0;
-            //   const trendDropPercent = stage1Diff > 0 ? ((stage1Diff - stage2Diff) / stage1Diff * 100) : 0;
-              
-            //   const logText = `[${nowTime()}] 📉 TREND CHECK FAILED | ${symbol} | Stage1: ${stage1Diff.toFixed(2)} → Stage2: ${stage2Diff.toFixed(2)} | Drop: ${trendDropPercent.toFixed(1)}% | Market skipped`;
-            //   pushMarketLog(opp.id, logText);
-            //   onSignal?.({ type: 'bidding', opp, text: logText });
-              
-            //   state.set(`${opp.id}:trend_check_failed_logged`, true);
-            //   updateMarketState(opp.id, {
-            //     trendCheckFailed: {
-            //       reason: `trend_drop_${trendDropPercent.toFixed(1)}pct`,
-            //       stage1Diff: stage1Diff,
-            //       stage2Diff: stage2Diff,
-            //       dropPercent: trendDropPercent,
-            //       time: nowTime()
-            //     }
-            //   });
-            // }
-            
-            // // 🔑 ОДНОКРАТНОЕ ЛОГИРОВАНИЕ НЕДОСТАТОЧНОЙ РАЗНИЦЫ
-            // if (priceDifference <= threshold && !state.get(`${opp.id}:threshold_check_failed_logged`)) {
-            //   const logText = `[${nowTime()}] 📉 THRESHOLD CHECK FAILED | ${symbol} | Current diff: ${priceDifference.toFixed(2)} < threshold: ${threshold} | Market skipped`;
-            //   pushMarketLog(opp.id, logText);
-            //   onSignal?.({ type: 'bidding', opp, text: logText });
-              
-            //   state.set(`${opp.id}:threshold_check_failed_logged`, true);
-            //   updateMarketState(opp.id, {
-            //     thresholdCheckFailed: {
-            //       currentDiff: priceDifference,
-            //       threshold: threshold,
-            //       time: nowTime()
-            //     }
-            //   });
-            // }
-
-            if (
-              secondsLeft >= 25 && 
-              secondsLeft < 29 &&                     
-              currentOutcomeState3.stage1 &&  
-              currentOutcomeState3.stage2 && 
-              priceToBet &&  // priceToBet не пустой
-              priceDifference > threshold &&  // разница больше 85 
-              (isTrendGrowing || isTrendValid) &&             
-              !state.get(`${opp.id}:final_logged`) &&
-              opp.keyword == 'bitcoin'
-            ) {
- 
-              // Используем ТОТ ЖЕ САМЫЙ исход, что и на Stage 1
-              const finalOutcome = targetOutcome2;
-
-              if (finalOutcome && opp.negRisk == false) {
-                // Защита от повторной записи
-                state.set(`${opp.id}:final_logged`, true);
-                const logText = `[${nowTime()}] START BIDDING: "${finalOutcome.name}" at ${secondsLeft}s - ${currentPrice}`;
-                pushMarketLog(opp.id, logText);
-                pushTechnicalLog(opp.conditionId, `[${nowTime()}] START BIDDING: "${finalOutcome.name}" for ${finalOutcome.price} at ${secondsLeft}s`, 'autobidbot_stage');
-                onSignal?.({ type: 'bidding', opp, text: logText });
-                if(opp.marketType == 'soccer') return; // запрет на спорт рынки
-                let bid_price = finalOutcome.price;
-
-                if(finalOutcome.price > 0.99){
-                  bid_price = 0.98;
-                }                                
-                try {
-                  // let tickSize = getTickSizeForOrder(opp, finalOutcome.assetId);
-                  let tickSize = '0.01'
-                  let order_expiration = '0';
-
-                  console.log(order_expiration);
-                  const buy = await placeTestOrder({
-                    tokenID: finalOutcome.assetId,
-                    price: bid_price,
-                    side: "BUY",
-                    size: BID_SIZE_5M,                    
-                    orderPriceMinTickSize: tickSize,
-                    expiration: order_expiration,
-                    order_type: "GTC"
-                  });
-            
-                  console.log(`[PlaceOrder] ✅ Ответ от placeTestOrder:`, buy);
-                  pushTechnicalLog(opp.conditionId, {
-                    message: `[${nowTime()}] Ответ от placeTestOrder`,
-                    status: buy.status,
-                    success: buy.success,
-                    orderId: buy.orderID,
-                    price: bid_price,
-                    size: BID_SIZE_5M,
-                    takingAmount: buy.takingAmount,
-                    makingAmount: buy.makingAmount,
-                    errorMsg: buy.errorMsg,
-                    orderPriceMinTickSize: tickSize
-                  }, 'autobidbot_buy');
-                  // 🔹 Проверяем, есть ли orderId (успех)
-                  if (buy?.orderID) {
-                    const logText = `[${nowTime()}] Order opened: ${buy.orderID}`;
-                    pushMarketLog(opp.id, logText);
-                    onSignal?.({ type: 'bidding', opp, text: logText });                    
-                    // ✅ Успешное размещение
-                    updateMarketState(opp.id, {
-                      outcome1: {
-                        value: finalOutcome.name,
-                        status: "order_placed",
-                        time: nowTime()
-                      }
-                    });
-                    // 🔥 ПРОСТАЯ ЗАПИСЬ ОРДЕРА В ФАЙЛ
-                    // 5 минутные не записываем что бы не было повторной попытки
-                    // saveOrder({
-                    //   orderId: buy.orderID,
-                    //   assetId: finalOutcome.assetId,
-                    //   outcome: finalOutcome.name,
-                    //   side: "BUY",
-                    //   price: bid_price,
-                    //   size: BID_SIZE,
-                    //   tickSize: tickSize
-                    // });                 
-                  } else {
-                    const logText = `[${nowTime()}] ❌ No order ID`;
-                    pushMarketLog(opp.id, logText);
-                    pushTechnicalLog(opp.conditionId, {
-                      type: 'autobidbot_buy',
-                      error: buy?.error || "Unknown error"
-                    }, 'autobidbot_buy');
-                    onSignal?.({ type: 'bidding', opp, text: logText });                    
-                    // ❌ Неудача — но ответ пришёл
-                    updateMarketState(opp.id, {
-                      outcome1: {
-                        value: finalOutcome.name,
-                        status: "order_failed",
-                        error: buy?.error || "Unknown error",
-                        time: nowTime()
-                      }
-                    });
-                  }
-                
-                } catch (error) {
-                  console.log(opp.slug);
-                  console.error(`[WS Handler] 💥 Ошибка при размещении ордера:`, error.message);
-                  const logText = `[${nowTime()}] ❌ Error (console)`;
-                  pushMarketLog(opp.id, logText);
-                  onSignal?.({ type: 'bidding', opp, text: logText });                   
-                  // ❌ Исключение — ордер не размещён
-                  updateMarketState(opp.id, {
-                    outcome1: {
-                      value: finalOutcome.name,
-                      status: "order_error",
-                      error: error.message,
-                      time: nowTime()
-                    }
-                  });
-                  
-                }
-
-                
-                
-              }
-            }
-
-          }
-
-          // ================================================
-          // ================================================  
-
-          if (stage !== 'tracking' && stage !== 'armed' && stage !== 'bidding') return;
-        });
       
         timer = setInterval(() => {
           tick(getOpportunities());
@@ -990,17 +97,56 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
   
     async function tick(opportunities) {
       const now = Date.now();
-      const currentSecond = Math.floor(now / 1000); // Текущая секунда UNIX timestamp
-      for (const opp of opportunities) {
 
-               
+      for (const opp of opportunities) {
+              
         // if (!isCryptoMarket(opp)) continue;
         
         if (!opp.rawEndDate || opp.resolved) continue;
         
         const secondsLeft = Math.floor((new Date(opp.rawEndDate) - now) / 1000);
+
+        // 1️⃣ ЕСЛИ МАРКЕТ ЗАВЕРШИЛСЯ И ВРЕМЯ ВЫШЛО: Скидываем остатки буфера на диск и пропускаем
+        if (secondsLeft < 0) {
+          if (marketBuffers[opp.conditionId] && marketBuffers[opp.conditionId].length > 0) {
+              flushBufferToDisk(opp.conditionId);
+          }
+          continue; // Дальше боту тут делать нечего, торги закрыты
+        }
+
         let minutesToSave = 0;
-        
+
+        // ⬇️ ЛОГГЕР ДАННЫХ ⬇️
+
+        // Инициализируем массив для маркета, если его еще нет
+        if (!marketBuffers[opp.conditionId]) {
+          marketBuffers[opp.conditionId] =[];
+          marketBuffers[opp.conditionId].push({
+            ts: now,
+            meta: true,
+            id: opp.id,
+            conditionId: opp.conditionId
+          });          
+        }
+      if(secondsLeft > 0 && secondsLeft < 900 && opp.keyword){
+        // Сохраняем слепок цен и объемов
+        marketBuffers[opp.conditionId].push({
+          ts: now,
+          outcomes: opp.outcomes.map(o => ({
+            assetId: o.assetId,
+            price: o.price,
+            size: o.size,
+            ask: o.best_ask,
+            bid: o.best_bid
+          }))
+        });
+
+        // Если накопили 60 тиков (1 минута) -> сбрасываем на диск
+        if (marketBuffers[opp.conditionId].length >= FLUSH_THRESHOLD) {
+          flushBufferToDisk(opp.conditionId);
+        }
+      }        
+        // ⬆️ КОНЕЦ ЛОГГЕРА ⬆️        
         
         if (opp.marketType === '5M') minutesToSave = 5;
         else if (opp.marketType === '15M') minutesToSave = 15;
@@ -1011,7 +157,6 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
         // Это момент: время окончания маркета - minutesToSave минут
         const endTime = new Date(opp.rawEndDate).getTime();
         const saveTime = endTime - (minutesToSave * 60 * 1000);
-        const saveSecond = Math.floor(saveTime / 1000); // Целевая секунда UNIX timestamp
 
         if(opp.arbitrage === true && secondsLeft > 1){
           startArbitrage(opp);
@@ -1023,12 +168,16 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
           !opp.priceToBet         // Цена ещё не сохранена
         );    
 
-        // 🔑 СТРОГОЕ СРАВНЕНИЕ СЕКУНД
-        // const shouldSavePrice = (
-        //   currentSecond === saveSecond &&   // ТОЧНО эта секунда
-        //   !opp.priceToBet                   // Цена еще не сохранена
-        // );
-    
+        // тест, присваиваем 15 && 5 минутным маркетам arbitrage true
+        if (opp.marketType === '15M' && secondsLeft < TIME_ENTER_TO && secondsLeft > TIME_ENTER_FROM && opp.keyword){
+          if (getAutoBidState()) {// если бот включен
+            opp.arbitrage = true;
+            updateMarketState(opp.id, {
+              arbitrage: true
+            });
+          }
+        }
+
         // Получаем символ и цену (только если нужно сохранять или уже сохранена цена)
         const symbol = getSymbolFromKeyword(opp.keyword);
         if (!symbol) continue;
@@ -1052,11 +201,7 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
             priceToBet: currentPrice
           });
         }
-        // if (!opp.priceToBet && secondsLeft < minutesToSave * 60 + 10) {
-        //   console.warn(`[MISSING] ${opp.title} | marketType: "${opp.marketType}" | symbol: ${symbol} | timeDiff: ${timeDiff}ms`);
-        // }
 
-        // if (secondsLeft <= 0) continue;
         if (secondsLeft <= 0) {
           state.delete(`${opp.id}:chosenOutcome`);
           state.delete(`${opp.id}:lockedOutcome`);
@@ -1072,21 +217,10 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
 
         if (stage === 'bidding') continue;
 
-        // if (stage === "idle" && secondsLeft <= 67) {
-        if (stage === "idle" && secondsLeft <= 3) {
-          state.set(opp.id, "tracking");
-          // console.log(`[${nowTime()}] 🤖 START TRACKING ${opp.slug} (${secondsLeft}s)`);
-          // let logText = `[${nowTime()}] tracking`;
-          // pushMarketLog(opp.id, logText);         
-          // onSignal?.({
-          //   type: "auto_bid_tracking",
-          //   opp,
-          //   text: logText,
-          //   secondsLeft
-          // });          
-        }
       }
     }
+
+    // пока самая интересная стратегия с ограничением бюджета 85, и время 10 минут 30 секунд, прибыль 5% и цена 0.32
 
     async function startArbitrage(opp) {
       // if (!getAutoBidState()) return;
@@ -1096,6 +230,13 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
       let state = marketStates.get(marketId);
 
       // if (state.p2BuyCount == null) state.p2BuyCount = 0;
+      // console.log(`[${nowTime()}][startArbitrage] marketId: ${marketId}, state type: ${typeof state}, state: ${JSON.stringify(state)}`);
+
+      if (!state) {
+        console.warn(`[${nowTime()}][startArbitrage] state undefined для ${marketId}`);
+        console.log(`[${nowTime()}][startArbitrage] marketId: ${marketId}, state type: ${typeof state}, state: ${JSON.stringify(state)}`);
+        return;
+      }
 
       if (!state.phase) {
         state.phase = "first_entry";
@@ -1127,18 +268,18 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
           const results = await Promise.allSettled([
             placeArbitrageOrder({
               tokenID: o1.assetId,
-              price: 0.42,
+              price: ENTRY_PRICE,
               side: "BUY",
-              size: 12,
+              size: ENTRY_BID_SIZE,
               orderPriceMinTickSize: tickSize,
               expiration: order_expiration,
               order_type: "GTC"
             }),
             placeArbitrageOrder({
               tokenID: o2.assetId,
-              price: 0.42,
+              price: ENTRY_PRICE,
               side: "BUY",
-              size: 12,
+              size: ENTRY_BID_SIZE,
               orderPriceMinTickSize: tickSize,
               expiration: order_expiration,
               order_type: "GTC"
@@ -1158,7 +299,7 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
               type: 'initial',
               assetId: o1.assetId,
               name: o1.name,
-              size: 6,
+              size: ENTRY_BID_SIZE,
               status: "OPEN"
             });
             logText = `[${nowTime()}] PlaceArbitrageOrder: success: ${results[0].value.success}, status: ${results[0].value.status}`;
@@ -1169,8 +310,8 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
               status:  results[0].value.status,
               success:  results[0].value.success,
               orderId:  results[0].value.orderID,
-              price: 0.45,
-              size: 6,
+              price: ENTRY_PRICE,
+              size: ENTRY_BID_SIZE,
               errorMsg:  results[0].value.errorMsg,
               orderPriceMinTickSize: tickSize
             }, 'autobidbot_buy');             
@@ -1187,7 +328,7 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
               type: 'initial',
               assetId: o2.assetId,
               name: o2.name,
-              size: 6,
+              size: ENTRY_BID_SIZE,
               status: "OPEN"
             });
             logText = `[${nowTime()}] PlaceArbitrageOrder: success: ${results[1].value.success}, status: ${results[1].value.status}`;
@@ -1198,8 +339,8 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
               status:  results[1].value.status,
               success:  results[1].value.success,
               orderId:  results[1].value.orderID,
-              price: 0.45,
-              size: 6,
+              price: ENTRY_PRICE,
+              size: ENTRY_BID_SIZE,
               errorMsg:  results[1].value.errorMsg,
               orderPriceMinTickSize: tickSize
             }, 'autobidbot_buy');                  
@@ -1295,6 +436,26 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
 
         const matchedOrder = initialOrders.find(o => o.status === "MATCHED");
         const openOrder = initialOrders.find(o => o.status === "OPEN");
+
+        if (arbitrageTestFlag) {
+          const cheapOutcome = opp.outcomes.find(o => Number(o.price) <= ENTRY_PRICE);
+
+          if (cheapOutcome) {
+            console.log(cheapOutcome.name, cheapOutcome.price);
+            // действие
+            const matchOrder = state.orders.find(
+              o => o.type === "initial" && o.assetId === cheapOutcome.assetId
+            );
+        
+            if (matchOrder) {
+              matchOrder.status = "MATCHED";
+              matchOrder.matchedTime = nowTime();
+              matchOrder.price = cheapOutcome.price;
+            }
+
+          }          
+        }
+
 
         if (matchedOrder && openOrder) {
           logText = `[${nowTime()}] First order matched [${matchedOrder.name}] for ${matchedOrder.price}, cancelling other...`;
@@ -1475,9 +636,10 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
               message: `[${nowTime()}] State phase: [${state.phase}]. Entry confirmed [${state.position.entry.name}]: ${filledSize} shares, "@", ${avgPrice}. Next phase: "recalculate"` 
             }, 'autobidbot_buy');      
             state.subStatus = "recalculate";
+            // state.subStatus = "placingRiskFree";
 
             // if(opp.marketType == '5M'){
-            //   state.subStatus = "recalculate5M";
+            //   state.subStatus = "placingRiskFree";
             // }
       
           } catch (err) {
@@ -1520,7 +682,7 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
         
           // 🔥 формула окупаемости первого исхода
           // const S2 = investment1 / (1 - P2); // просто выйти в ноль
-          const profitPercent = 0.10;
+          const profitPercent = HEDGE50_PROFIT_PERCENT;
           // const S2 = (investment1 * (1 + profitPercent)) / (1 - P2);
           const S2 = (investment1 * (1 + profitPercent)) / (1 - P2 * (1 + profitPercent));
 
@@ -1544,9 +706,178 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
           return;
         }
         
-        if (state.subStatus === "recalculate5M") {
+        if (state.subStatus === "placingRiskFree") {
+          // 🛡️ Защита — размещаем ордер только один раз
+          if (state.isPlacingRiskFreeOrder) return;
+          state.isPlacingRiskFreeOrder = true;
+          marketStates.set(marketId, state);
 
+          try {
+            const P2 = Number(
+              opp.outcomes.find(o => o.assetId === state.position.hedge.assetId)?.price
+            );
+            const hedgeName = opp.outcomes.find(o => o.assetId === state.position.hedge.assetId)?.name;
+
+            if (!P2 || P2 >= 0.99) return;
+
+            const S1 = state.position.entry.size;
+            const P1 = state.position.entry.price;
+            const investment1 = S1 * P1;
+            const minProfit = 0.03;
+
+            // 📐 Считаем risk-free цену один раз
+            // Нам нужна такая P2 при которой обе стороны дают >= 3%
+            // Берём текущую цену или чуть ниже — выставляем лимитный GTC ордер
+            
+            // Максимальная цена P2 при которой risk-free возможен
+            // знаменатель должен быть > 0: P2 < 1/1.03 = 0.9709
+            // const riskFreeP2 = Number((1 / (1 + minProfit) - 0.001).toFixed(4)); // ~0.9699 — но это теоретический максимум
+            
+            // Лучше взять цену при которой S2 будет разумным.
+            // Например целевая прибыль 3% → считаем S2 при текущей рыночной P2
+            const currentP2 = Number(
+              opp.outcomes.find(o => o.assetId === state.position.hedge.assetId)?.price
+            );
+            
+            // Берём минимум из текущей цены и теоретического максимума
+            const targetP2 = 0.52;
+            
+            const S2 = (investment1 * (1 + minProfit)) / (1 - targetP2 * (1 + minProfit));
+            const investment2 = S2 * targetP2;
+            
+            logText = `[${nowTime()}] 📋 Risk-free calc: invested $${investment1} (${S1} @ ${P1}), need ${S2.toFixed(2)} shares @ ${targetP2}, cost $${investment2.toFixed(2)}`;
+
+
+            pushMarketLog(opp.id, logText);
+            onSignal?.({ type: 'bidding', opp, text: logText });
+
+            // 🔥 Размещаем GTC ордер
+            let tickSize = '0.01'; 
+            let order_expiration = parseInt(((new Date().getTime() + 60 * 1000 + 10 * 1000) / 1000).toString());
+            const riskFreeResult = await placeArbitrageOrder({
+              tokenID: state.position.hedge.assetId,
+              price: targetP2,
+              side: "BUY",
+              size: Number(S2.toFixed(2)),
+              orderPriceMinTickSize: tickSize,
+              expiration: order_expiration,
+              order_type: "GTC"
+            });
+            pushTechnicalLog(opp.conditionId, {
+              message: `[${nowTime()}] State phase: [${state.phase}]. Placing risk-free order: `, riskFreeResult
+            }, 'autobidbot_buy');  
+            if (riskFreeResult?.success && riskFreeResult?.orderID) {
+              state.orders.push({
+                orderId: riskFreeResult.orderID,
+                assetId: state.position.hedge.assetId,
+                type: 'hedgeRiskFree',
+                price: targetP2,
+                size: Number(S2.toFixed(2)),
+                status: "OPEN"
+              });
+         
+              state.position.hedge.size = Number(S2.toFixed(2));
+              state.position.hedge.price = targetP2;
+              state.position.hedge.requiredSize = Number(S2.toFixed(2));
+              state.riskFreeOrderPlacedAt = Date.now(); // ⏱ фиксируем время размещения
+              state.subStatus = "waitingRiskFreeOrder";
+              logText = `[${nowTime()}] ✅ Hedge Risk-Free placed: ${Number(S2.toFixed(2))} shares @ price ${targetP2}`;
+              pushMarketLog(opp.id, logText);
+              onSignal?.({ type: 'bidding', opp, text: logText });
+            } else {
+              logText = `[${nowTime()}] ❌ Hedge Risk-Free failed`;
+              pushMarketLog(opp.id, logText);
+              onSignal?.({ type: 'bidding', opp, text: logText });     
+              pushTechnicalLog(opp.conditionId, {
+                message: `[${nowTime()}] State phase: [${state.phase}]. Hedge Risk-Free failed`
+              }, 'autobidbot_buy');                      
+            }
+          } catch (err) {
+            // Если не удалось разместить — сбрасываем флаг чтобы попробовать снова
+            state.isPlacingRiskFreeOrder = false;
+            pushTechnicalLog(opp.conditionId, {
+              message: `[${nowTime()}] Failed to place risk-free GTC order:`, err
+            }, 'autobidbot_buy');
+            console.error(`[${nowTime()}][waitingRiskFree] placeOrder failed:`, err);
+          }
+
+          marketStates.set(marketId, state);
+          return;
         }
+
+        // ⏳ Ждём исполнения GTC ордера
+        if (state.subStatus === "waitingRiskFreeOrder") {
+          if (state.isCheckingRiskFreeOrder) return;
+          state.isCheckingRiskFreeOrder = true;
+          marketStates.set(marketId, state);
+
+          try {
+            const elapsed = Date.now() - state.riskFreeOrderPlacedAt;
+            const WAIT_TIMEOUT = 20_000;
+
+            const riskFreeOrder = state.orders.find(o => o.type === 'hedgeRiskFree');
+            if (!riskFreeOrder) return;
+            
+            let filledSize;
+            // тесты -->
+            if (arbitrageTestFlag) {
+              const P2 = Number(
+                opp.outcomes.find(o => o.assetId === state.position.hedge.assetId)?.price
+              );
+              if(P2 <= state.position.hedge.price){
+                filledSize = state.position.hedge.requiredSize;
+              } else {
+                
+              }              
+            // тест 
+            } else {
+              const order = await getOrder(riskFreeOrder.orderId, client);
+              filledSize = Number(order.size_matched);
+            }
+            
+           
+
+            
+
+            pushTechnicalLog(opp.conditionId, {
+              message: `[${nowTime()}] waitingRiskFreeOrder check. elapsed: ${(elapsed / 1000).toFixed(1)}s, filled: ${filledSize}/${state.position.hedge.requiredSize}`
+            }, 'autobidbot_buy');
+
+            // ✅ Ордер исполнен
+            if (filledSize >= state.position.hedge.requiredSize) {
+              logText = `[${nowTime()}] ✅ Risk-free GTC order filled! ${filledSize} shares @ ${state.position.hedge.price}`;
+              pushMarketLog(opp.id, logText);
+              onSignal?.({ type: 'bidding', opp, text: logText });
+              state.position.hedge.initialValue = state.position.hedge.price*filledSize;
+              state.phase = "positions_recalculate"; 
+              delete state.subStatus;
+              delete state.riskFreeOrderPlacedAt;
+              delete state.isPlacingRiskFreeOrder;
+
+            // ⏱ Тайм-аут — отменяем ордер и идём в recalculate
+            } else if (elapsed >= WAIT_TIMEOUT) {
+              logText = `[${nowTime()}] ⏱ Risk-free GTC order timeout. Cancelling and switching to recalculate.`;
+              pushMarketLog(opp.id, logText);
+              onSignal?.({ type: 'bidding', opp, text: logText });
+
+              await cancelOrder(client, riskFreeOrder.orderId);
+
+              state.subStatus = "recalculate";
+              delete state.riskFreeOrderPlacedAt;
+              delete state.isPlacingRiskFreeOrder;
+            }
+
+          } catch (err) {
+            pushTechnicalLog(opp.conditionId, {
+              message: `[${nowTime()}] waitingRiskFreeOrder check failed:`, err
+            }, 'autobidbot_buy');
+            console.error(`[${nowTime()}][waitingRiskFreeOrder] error:`, err);
+          }
+
+          state.isCheckingRiskFreeOrder = false;
+          marketStates.set(marketId, state);
+          return;
+        }        
       } 
       
       if (state.phase === "enter_hedge") {
@@ -1636,7 +967,7 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
             const randomChance = Math.random(); // 0..1
 
             // например 30% вероятность матча
-            if (randomChance < 0.3) {
+            if (randomChance < 0.8) {
               hedgeOrder.status = 'MATCHED';
               hedgeOrder.matchedTime = nowTime();
           
@@ -1708,6 +1039,45 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
 
       if (state.phase === "waiting_arbitrage_fill") {
         const openArbitrageOrders = state.orders.filter(o => o.type === 'arbitrage' && o.status === 'OPEN');
+
+        const lastArbitrageOrder = state.orders.findLast(
+          o => o.type === 'arbitrage'
+        );
+        // ← ищем отдельно отменённый через вебсокет
+        const cancelledByWS = lastArbitrageOrder?.status === 'CANCELLED' && !lastArbitrageOrder?.timeoutStart
+          ? lastArbitrageOrder
+          : null;
+
+        
+
+        if (cancelledByWS) {
+          const reason = cancelledByWS.reason || '';
+          
+          if (state.activeGTCOrderId === cancelledByWS.orderId) {
+            delete state.activeGTCOrderId;
+            delete state.activeGTCAssetId;
+          }
+          
+          if (reason.startsWith('P3 grid')) {
+            const loserPos = state.position.entry?.assetId === cancelledByWS.assetId
+              ? state.position.entry : state.position.hedge;
+            if (loserPos?.gridLevels) {
+              const level = loserPos.gridLevels.find(l => l.triggered);
+              if (level) level.triggered = false;
+            }
+          }
+
+          const priceLog = opp.outcomes.map(o => `${o.name}: ${o.price}`).join(', ');
+          logText = `[${nowTime()}] ⚡ Ордер отменён через вебсокет. Price now: ${priceLog}`;
+          pushMarketLog(opp.id, logText);
+          onSignal?.({ type: 'bidding', opp, text: logText });
+
+          state.isRecalculating = false;
+          state.phase = "positions_recalculate";
+          marketStates.set(marketId, state);
+          return;
+        }
+
         if (openArbitrageOrders.length > 0) {
           const arbitrageOrder = openArbitrageOrders[0];
           // проверяем таймаут и отмену
@@ -1716,18 +1086,38 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
           if (arbitrageTestFlag) {
             // -->  тест
             const elapsed = now - arbitrageOrder.timeoutStart
-            if (elapsed >= 8_000) {
-              const randomChance = Math.random(); // 0..1
+            if (elapsed >= 7_000) {
+              // const randomChance = Math.random(); // 0..1
 
-              // например 30% вероятность матча
-              if (randomChance < 0.6) {
+              // Находим текущую цену этого асета из opp.outcomes
+              const currentOutcome = opp.outcomes.find(o => o.assetId === arbitrageOrder.assetId);
+              const currentAsk = currentOutcome?.best_ask || currentOutcome?.price || 0;
+
+              // FOK: исполняется если наша цена >= текущего ask
+              const isPriceOk = currentAsk > 0 && arbitrageOrder.price >= currentAsk;
+              if (isPriceOk) {
                 arbitrageOrder.status = 'MATCHED';
                 arbitrageOrder.matchedTime = nowTime();
-            
-                logText = `[${nowTime()}] 🎲 TEST: Arbitrage order randomly matched`;
+                arbitrageOrder.price = currentAsk; // исполняем по реальной цене
+          
+                logText = `[${nowTime()}] ✅ TEST: Arbitrage order matched at $${currentAsk} (order price: $${arbitrageOrder.price})`;
                 pushMarketLog(opp.id, logText);
                 onSignal?.({ type: 'bidding', opp, text: logText });
-              }  
+              }
+
+              // например 30% вероятность матча
+              // if (randomChance < 0.2) {
+              //   arbitrageOrder.status = 'MATCHED';
+              //   arbitrageOrder.matchedTime = nowTime();
+
+              //   const priceDeviation = -(Math.random() * 0.03);
+              //   const newPrice = Math.min(0.99, Math.max(0.02, arbitrageOrder.price + priceDeviation));
+              //   arbitrageOrder.price = Math.round(newPrice * 100) / 100;
+
+              //   logText = `[${nowTime()}] 🎲 TEST: Arbitrage order randomly matched`;
+              //   pushMarketLog(opp.id, logText);
+              //   onSignal?.({ type: 'bidding', opp, text: logText });
+              // }  
             }  
             // <-- тест
           }
@@ -1747,15 +1137,67 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
               arbitrageOrder.status = "CANCELLED"; 
               // Очищаем таймер и возвращаем фазу на recalc
               delete arbitrageOrder.timeoutStart;
+              
+              const reason = arbitrageOrder.reason || '';
+
+              // P2 GTC — снимаем флаг активного GTC
+              if (state.activeGTCOrderId === arbitrageOrder.orderId) {
+                delete state.activeGTCOrderId;
+                delete state.activeGTCAssetId;
+                logText = `[${nowTime()}] ↩️ GTC ордер отменён, флаг снят`;
+                pushMarketLog(opp.id, logText);
+              }
+            
+              // P3 Grid — сбрасываем triggered уровень
+              if (reason.startsWith('P3 grid')) {
+                const loserPos = state.position.entry?.assetId === arbitrageOrder.assetId
+                  ? state.position.entry
+                  : state.position.hedge;
+            
+                if (loserPos?.gridLevels) {
+                  const level = loserPos.gridLevels.find(l => l.triggered);
+                  if (level) {
+                    level.triggered = false;
+                    logText = `[${nowTime()}] ↩️ Grid уровень ${level.price} сброшен после отмены`;
+                    pushMarketLog(opp.id, logText);
+                  }
+                }
+              }
+            
+              // P1, P4 FOK — ничего не сбрасываем
+              // recalculate сам пересчитает на следующем тике
+              if (reason.startsWith('P1') || reason.startsWith('P4')) {
+                logText = `[${nowTime()}] ↩️ ${reason.startsWith('P1') ? 'P1' : 'P4'} ордер не исполнился, пересчитываем`;
+                pushMarketLog(opp.id, logText);
+              }
+              //state.isRecalculating = false;
               state.phase = "positions_recalculate"; // возвращаемся к пересчету
 
+              const priceLog = opp.outcomes
+              .map(o => `${o.name}: ${o.price}`)
+              .join(', ');
+
               marketStates.set(marketId, state);
-              logText = `[${nowTime()}] 🕒 Arbitrage order canceled...`;
+              logText = `[${nowTime()}] 🕒 Arbitrage order canceled... Price now: ${priceLog}`;
               pushMarketLog(opp.id, logText);
               onSignal?.({ type: 'bidding', opp, text: logText }); 
                               
               return;
             } else {
+              
+              // ⬇️ ДОБАВЬ ЭТОТ БЛОК ПРОВЕРКИ ⬇️
+              const reason = cancelResult?.not_canceled?.[arbitrageOrder.orderId];
+              if (reason === 'Already matched or invalid') {
+                  logText = `[${nowTime()}] 💡 Ордер ${arbitrageOrder.orderId} уже был исполнен. Переходим к расчету.`;
+                  pushMarketLog(opp.id, logText);
+                  
+                  arbitrageOrder.status = "MATCHED"; // Принудительно ставим статус
+                  state.phase = "positions_recalculate"; // Продвигаем фазу дальше
+                  marketStates.set(marketId, state);
+                  return; 
+              }
+              // ⬆️ КОНЕЦ БЛОКА ⬆️
+
               logText = `[${nowTime()}] Error: Arbitrage order not canceled`;
               pushMarketLog(opp.id, logText);
               onSignal?.({ type: 'bidding', opp, text: logText });
@@ -1764,6 +1206,7 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
             }          
           } 
         } else {
+
           // нет открытых hedge50 — делаем recalc и пытаемся разместить снова
           logText = `[${nowTime()}] ✅ All arbitrage orders matched. Recalculating positions...`;
           pushMarketLog(opp.id, logText);
@@ -1783,6 +1226,12 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
                 break;
               }
             }
+
+            if (state.activeGTCOrderId && lastMatchedOrder?.orderId === state.activeGTCOrderId) {
+              delete state.activeGTCOrderId;
+              delete state.activeGTCAssetId;
+            }
+
             let currentSize = 0;
             // console.log(lastMatchedOrder);
             // Проверяем entry
@@ -1894,11 +1343,19 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
             // остановился здесь на позициях. По всей видимости передаются пустые, возможно обновляются тольк когда mined
           }
           
-          const newPositions = positions.map(p => ({
-            outcome: p.outcome,
-            size: Number(p.size),
-            initialValue: Number(p.initialValue)
-          }));
+          const newPositions = positions.map(p => {
+            // находим текущую цену из opp.outcomes
+            const currentPrice = Number(
+              opp.outcomes.find(o => o.assetId === p.asset)?.price ?? 0
+            );
+            
+            return {
+              outcome: p.outcome,
+              size: Number(p.size),
+              initialValue: Number(p.initialValue),
+              currentPrice, // ← добавить
+            };
+          });
           
           const lastSnapshot = state.positionsHistory[state.positionsHistory.length - 1];
           
@@ -1922,7 +1379,7 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
           
           if (isSame) {
             // Обновляем только время
-            lastSnapshot.time = nowTime();
+            // lastSnapshot.time = nowTime();
           } else {
             // Добавляем новый snapshot
             state.positionsHistory.push({
@@ -1935,22 +1392,6 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
               state.positionsHistory.shift();
             }
           }
-
-
-          // === 📊 Печать истории позиций ===
-          console.log("\n=== Positions History ===");
-
-          state.positionsHistory.forEach((snap, index) => {
-            console.log(`\n#${index + 1} [${snap.time}]`);
-            console.table(
-              Object.fromEntries(
-                snap.positions.map((p, i) => [
-                  i === 0 ? 'A' : 'B',
-                  { Outcome: p.outcome, Size: p.size, 'Initial$': p.initialValue }
-                ])
-              )
-            );
-          });
 
           
             // === 💾 Запоминаем initialCapital один раз при первом вызове ===
@@ -1970,9 +1411,11 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
             positions,
             entry: state.position.entry,
             hedge: state.position.hedge,
+            hasActiveGTC: !!state.activeGTCOrderId,
+            gridState: state.gridState || {},
             opp,
             nextTurn: state.nextTurn,
-            profitTarget: 0.05,
+            profitTarget: PROFIT_PERCENT,
             maxCapitalMultiplier: 3,
             initialCapital: state.initialCapital,
             takerFeeBps: 2500,   // из маркета: takerBaseFee (crypto = 2500 = feeRate 0.25)
@@ -1982,8 +1425,22 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
         
           });  
 
-          // 3) Если есть в ответе какое-то действие то делаем ордер с помощью внешней функции
+          if (!result) return;
 
+          if (result.error) {
+            console.error(`[${nowTime()}][positions_recalculate] Recalculate error: ${result.error}`);
+            return;
+          }
+          if (result && !result.error) {
+            logDecision(marketId, result, state);
+          }
+
+          // После — сохраняем обратно:
+          if (result.gridState) {
+            state.gridState = result.gridState;
+            marketStates.set(marketId, state);
+          }
+                    
           if(result.action){
             state.nextTurn = result.action.nextTurn;   // ← сохраняем в state
             // if (result.action.p2BuyCount !== undefined) {
@@ -2002,6 +1459,14 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
             }
 
             let order = await sendArbitrageOrder(result.action, opp);
+            if (order) {
+              if (result.action.order_type === 'GTC') {
+                state.activeGTCOrderId = order.orderId;
+                state.activeGTCAssetId = result.action.assetId;
+              }
+              state.phase = "waiting_arbitrage_fill"; // ← добавить
+            }
+            marketStates.set(opp.conditionId, state);   
           }
           if (
             !result.action && result.isRiskFree
@@ -2015,7 +1480,7 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
           
             return;
           }        
-          console.log(`[${nowTime()}][status: positions_recalculate] Recalculate result:`, result); 
+          // console.log(`[${nowTime()}][status: positions_recalculate] Recalculate result:`, result); 
         } catch (err) {
           console.error(`[${nowTime()}][positions_recalculate] Error:`, err);
         } finally {
@@ -2028,2224 +1493,1045 @@ export function createAutoBidBot({ onSignal, placeOrder, placeOrderSell, execute
 
   
     }
-    // Объяснения :
-    // P0 — Risk-free достигнут
-    // Оба исхода прибыльны одновременно. Бот останавливается, больше ничего не делает.
 
-    // P1b — Прямой выстрел в RF через лузера
-    // Лузер (проигрывающий исход) сильно подешевел (≤ 0.48). Бот считает: если купить его прямо сейчас одной сделкой — сразу выходим в risk-free. Это самый желанный сценарий. Называется "b" потому что был добавлен после P1a.
-    // Пример: Up торгуется по 0.90, Down упал до 0.15. Покупаем Down дёшево — и теперь при любом исходе в плюсе.
+    // идеально работает
+    function recalculate({
+      positions,
+      entry,
+      hedge,
+      hasActiveGTC = false,
+      opp,
+      nextTurn = 'loser',
+      profitTarget = 0.15,
+      maxBudget = 420,
+      pushMarketLog,
+      onSignal,
+    } = {}) {
 
-    // P1a — Прямой выстрел в RF через winner
-    // То же самое но наоборот — winner (выигрывающий) неожиданно подешевел ниже 0.48. Докупаем его и сразу выходим в RF. Редкий сценарий.
+      const log     = (text) => { pushMarketLog?.(opp.id, text); onSignal?.({ type: 'bidding', opp, text }); };
+      const r2      = (n) => Math.round(n * 100) / 100;
+      const perc    = (profit, total) => `${((profit / total) * 100).toFixed(1)}%`;
+      const minSize = (price) => Math.ceil((1.0 / price) * 100) / 100;
 
-    // P2 — Экстренная докупка winner до безубытка
-    // Winner убыточен — если он победит прямо сейчас, мы в минусе. P2 покупает ровно столько winner чтобы выйти хотя бы в ноль. Выполняется всегда, не ждёт хорошей цены — потому что без этого при победе winner мы теряем деньги.
-    // Пример: Up = winner @ 0.75, но у нас его мало и S_Up < I_total. P2 докупает Up чтобы S_Up ≥ I_total.
+      // ─── Валидация ───────────────────────────────────────────────────────────────
+      const entryPos = positions.find(p => p.asset === entry.assetId);
+      const hedgePos = positions.find(p => p.asset === hedge.assetId);
+      if (!entryPos || !hedgePos) { log(`❌ позиции не найдены`); return null; }
 
-    // P3 — Плановая докупка winner
-    // Очередь дошла до winner (nextTurn = 'winner'). Покупаем его немного — но только если цена ниже нашей средней (улучшает pairCost). Если цена выше средней — пропускаем и ждём. Это чередование с P4.
+      const S_A     = Number(entryPos.size);
+      const S_B     = Number(hedgePos.size);
+      const I_A     = Number(entryPos.initialValue);
+      const I_B     = Number(hedgePos.initialValue);
+      const I_total = I_A + I_B;
 
-    // P4 — Плановая докупка лузера
-    // Очередь дошла до лузера (nextTurn = 'loser'). Покупаем страховку — но только если цена достаточно низкая (динамический порог: avg_loser * 0.60). Смысл: купить лузера дёшево чтобы снизить его среднюю цену и приблизиться к RF.
+      const P_A = Number(opp.outcomes.find(o => o.assetId === entry.assetId)?.price ?? 0);
+      const P_B = Number(opp.outcomes.find(o => o.assetId === hedge.assetId)?.price ?? 0);
+      if (!P_A || !P_B) { log(`❌ цены не найдены`); return null; }
+      if (S_A <= 0 || S_B <= 0) { log(`❌ размеры позиций = 0`); return null; }
 
+      const budgetLeft = maxBudget - I_total;
 
+      // ─── Текущее состояние ───────────────────────────────────────────────────────
+      const Profit_A   = S_A - I_total;
+      const Profit_B   = S_B - I_total;
+      const isRiskFree = Profit_A > 0 && Profit_B > 0;
 
-    // норм работает, но для GTC ордеров
-    /**
-     * recalculate — Gabagool-style binary market hedging strategy
-     *
-     * ЛОГИКА ПРИОРИТЕТОВ (в порядке убывания):
-     *
-     *  P0. Risk-free уже достигнут → стоп
-     *  P1. Можно достичь risk-free одной докупкой победителя → ДЕЛАЕМ (независимо от nextTurn)
-     *  P2. Победитель убыточен (Profit_winner < 0) → ONE SHOT: покупаем ровно столько чтобы выйти в безубыток
-     *  P3. nextTurn='winner' → докупаем победителя (стандартное чередование)
-     *  P4. nextTurn='loser'  → ждём пока loser ≤ 0.20, затем покупаем страховку
-     *
-     * Дополнительно:
-     *  - Если цена победителя < 0.48 — проверяем возможность быстрого risk-free через него
-     *  - Лузер покупается только при цене ≤ 0.20 (дёшево = хорошая страховка)
-     *  - nextTurn управляет чередованием, но НЕ блокирует приоритетные покупки (P1, P2)
-     *
-     * @param {object} params
-     * @param {Array}  params.positions           — текущие позиции [{ asset, size, initialValue }]
-     * @param {object} params.entry               — первый исход { assetId, name }
-     * @param {object} params.hedge               — второй исход { assetId, name }
-     * @param {object} params.opp                 — рынок { id, outcomes, rawEndDate }
-     * @param {string} params.nextTurn            — 'winner' | 'loser' (управляется снаружи)
-     * @param {number} [params.profitTarget=0.05] — минимальный профит победителя (доля от I_total)
-     * @param {number} [params.initialCapital]    — I_A+I_B при первом запуске. Передавать снаружи!
-     * @param {number} [params.maxCapitalMultiplier=3]
-     * @param {Function} [params.pushMarketLog]
-     * @param {Function} [params.onSignal]
-     */
-    // function recalculate({
-    //   positions,
-    //   entry,
-    //   hedge,
-    //   opp,
-    //   nextTurn = 'winner',
-    //   profitTarget = 0.05,
-    //   maxCapitalMultiplier = 3,
-    //   initialCapital,
-    //   pushMarketLog,
-    //   onSignal,
-    // } = {}) {
+      const state = {
+        S_A, S_B, I_A, I_B,
+        I_total:       r2(I_total),
+        P_A, P_B,
+        Profit_A:      r2(Profit_A),
+        Profit_A_perc: perc(Profit_A, I_total),
+        Profit_B:      r2(Profit_B),
+        Profit_B_perc: perc(Profit_B, I_total),
+        isRiskFree,
+        budgetLeft:    r2(budgetLeft),
+        nextTurn,
+      };
+      const ret = (extra) => ({ ...state, ...extra });
 
-    //   const nowTime = () => new Date().toISOString().slice(11, 19);
-    //   const log = (text) => { pushMarketLog?.(opp.id, text); onSignal?.({ type: 'bidding', opp, text }); };
+      // ─── Симуляция покупки ───────────────────────────────────────────────────────
+      const simulate = (assetId, price, size) => {
+        const new_S_A = S_A + (assetId === entry.assetId ? size : 0);
+        const new_S_B = S_B + (assetId === hedge.assetId ? size : 0);
+        const new_I   = I_total + price * size;
+        const pa = new_S_A - new_I;
+        const pb = new_S_B - new_I;
+        return {
+          S_A: r2(new_S_A), S_B: r2(new_S_B), I_total: r2(new_I),
+          Profit_A: r2(pa), Profit_B: r2(pb),
+          isRiskFree: pa > 0 && pb > 0,
+        };
+      };
 
-    //   // ─── 1. Валидация ───────────────────────────────────────────────────────────
-    //   const entryPos = positions.find(p => p.asset === entry.assetId);
-    //   const hedgePos = positions.find(p => p.asset === hedge.assetId);
-    //   if (!entryPos || !hedgePos) { log(`❌ позиции не найдены`); return null; }
+      // ─── Расчёт размера для RF ───────────────────────────────────────────────────
+      // Покупаем x shares по price. После:
+      //   profit_self  = profit_self_cur  + x*(1 - price)
+      //   profit_other = profit_other_cur - x*price
+      //   new_I        = I_total + x*price
+      // Условия RF+profitTarget:
+      //   profit_other_cur - x*price >= (I_total + x*price) * profitTarget
+      //   → x_max = (profit_other_cur - I_total*profitTarget) / (price*(1+profitTarget))
+      //   profit_self_cur + x*(1-price) >= (I_total + x*price) * profitTarget
+      //   → x_min = (I_total*profitTarget - profit_self_cur) / (1 - price*(1+profitTarget))
+      const calcRFSize = (assetId, price, profit_self, profit_other) => {
+        if (price >= 0.98) return null;
 
-    //   const S_A = Number(entryPos.size);
-    //   const S_B = Number(hedgePos.size);
-    //   const I_A = Number(entryPos.initialValue);
-    //   const I_B = Number(hedgePos.initialValue);
-    //   const I_total = I_A + I_B;
-    //   const avg_A = S_A > 0 ? I_A / S_A : 0;
-    //   const avg_B = S_B > 0 ? I_B / S_B : 0;
-    //   const pairCost = avg_A + avg_B;
+        const x_max_raw = (profit_other - I_total * profitTarget) / (price * (1 + profitTarget));
+        if (x_max_raw <= 0) return null;
+        const x_max = Math.floor(x_max_raw * 100) / 100;
 
-    //   // ─── 2. Текущие цены ────────────────────────────────────────────────────────
-    //   const P_A = Number(opp.outcomes.find(o => o.assetId === entry.assetId)?.price ?? 0);
-    //   const P_B = Number(opp.outcomes.find(o => o.assetId === hedge.assetId)?.price ?? 0);
-    //   if (!P_A || !P_B) { log(`❌ цены не найдены`); return null; }
+        let x_min = 0;
+        if (profit_self < I_total * profitTarget) {
+          const denom = 1 - price * (1 + profitTarget);
+          if (denom <= 0) return null;
+          x_min = Math.ceil(((I_total * profitTarget - profit_self) / denom) * 100) / 100;
+        }
 
-    //   // ─── 3. Прибыль при каждом исходе ──────────────────────────────────────────
-    //   const Profit_A = S_A - I_total;
-    //   const Profit_B = S_B - I_total;
-    //   const isRiskFree = Profit_A > 0 && Profit_B > 0;
-    //   const riskFreeProximity = Math.min(Profit_A, Profit_B) / I_total;
+        if (x_min > x_max) return null;
 
-    //   // ─── 4. Определяем победителя ───────────────────────────────────────────────
-    //   // Победитель = исход с ценой > 0.52 (более мягкий порог чем 0.65)
-    //   // Это позволяет реагировать раньше при движении цены
-    //   const winnerAsset = P_A > 0.52 ? entry : (P_B > 0.52 ? hedge : null);
-    //   const loserAsset  = P_A > 0.52 ? hedge : (P_B > 0.52 ? entry : null);
+        const size = Math.max(x_min, minSize(price));
+        if (size > x_max) return null;
+        if (size * price > budgetLeft) return null;
 
-    //   const P_winner = winnerAsset?.assetId === entry.assetId ? P_A : P_B;
-    //   const P_loser  = loserAsset?.assetId  === entry.assetId ? P_A : P_B;
-    //   const S_winner = winnerAsset?.assetId === entry.assetId ? S_A : S_B;
-    //   const S_loser  = loserAsset?.assetId  === entry.assetId ? S_A : S_B;
+        const sim = simulate(assetId, price, size);
+        if (!sim.isRiskFree) return null;
 
-    //   // ─── Стейт для возвратов ────────────────────────────────────────────────────
-    //   const r2 = (n) => Math.round(n * 100) / 100; // округление до 2 знаков
-    //   const perc = (profit, total) => `${((profit / total) * 100).toFixed(1)}%`;
+        return size;
+      };
 
-    //   const state = {
-    //     S_A, S_B, I_A, I_B,
-    //     I_total:            r2(I_total),
-    //     avg_A:              r2(avg_A),
-    //     avg_B:              r2(avg_B),
-    //     pairCost:           r2(pairCost),
-    //     P_A, P_B,
-    //     Profit_A:           r2(Profit_A),
-    //     Profit_A_perc:      perc(Profit_A, I_total),
-    //     Profit_B:           r2(Profit_B),
-    //     Profit_B_perc:      perc(Profit_B, I_total),
-    //     isRiskFree, riskFreeProximity,
-    //     nextTurn,
-    //   };
-    //   const ret = (extra) => ({ ...state, ...extra });
+      // ─── Сетка уровней -10% от стартовой цены ────────────────────────────────────
+      const buildGrid = (startPrice) => {
+        const levels = [];
+        for (let i = 1; i <= 9; i++) {
+          const p = Math.round(startPrice * (1 - 0.10 * i) * 100) / 100;
+          if (p <= 0.01) break;
+          levels.push({ price: p, triggered: false });
+        }
+        return levels;
+      };
 
-    //   // ─── P0. Risk-free уже достигнут ────────────────────────────────────────────
-    //   if (isRiskFree) {
-    //     log(`🏆 Risk-free! Profit_A=${Profit_A.toFixed(3)} Profit_B=${Profit_B.toFixed(3)}`);
-    //     return ret({ action: null, reason: 'risk-free locked' });
-    //   }
+      // ─── Стороны ─────────────────────────────────────────────────────────────────
+      const sideA = { assetId: entry.assetId, name: entry.name, price: P_A, profit: Profit_A, pos: entryPos };
+      const sideB = { assetId: hedge.assetId, name: hedge.name, price: P_B, profit: Profit_B, pos: hedgePos };
+      const loser  = Profit_A <= Profit_B ? sideA : sideB;
+      const winner = Profit_A <= Profit_B ? sideB : sideA;
 
-    //   // ─── P1b. Risk-free через докупку ЛУЗЕРА ───────────────────────────────────
-    //   //
-    //   // Идея: если лузер подешевел — можно усреднить его цену вниз и выйти в risk-free.
-    //   //
-    //   // Условие risk-free после докупки лузера на dQ shares:
-    //   //   new_S_loser  = S_loser + dQ
-    //   //   new_I_total  = I_total + P_loser * dQ
-    //   //   Нужно: (new_S_loser  - new_I_total) > 0  →  dQ > (I_total - S_loser) / (1 - P_loser)
-    //   //          (S_winner     - new_I_total) > 0  →  dQ < (S_winner - I_total) / P_loser
-    //   //
-    //   // Если дешевеет до ≤ riskFreeShotMaxPrice и диапазон dQ непустой — стреляем!
-    //   {
-    //     // Порог P1b: лузер должен стоить < 0.48.
-    //     // Никакого динамического порога — он сам себя снижал после каждой покупки лузера.
-    //     // Единственный реальный фильтр: математическая проверка что RF достижим (dQ_min < dQ_max).
-    //     const loserIsA  = P_A < P_B; // A=entry дешевле → он лузер
-    //     const I_loser_raw = loserIsA ? I_A : I_B;
-    //     const S_loser_raw = loserIsA ? S_A : S_B;
-    //     const P_loser_raw = loserIsA ? P_A : P_B;
-    //     const S_winner_raw = loserIsA ? S_B : S_A;
-    //     const avgLoser_raw  = S_loser_raw > 0 ? I_loser_raw / S_loser_raw : 1;
-    //     const riskFreeShotMaxPrice = 0.48; // фиксированный порог — математика сама отфильтрует невозможные случаи
+      // ════════════════════════════════════════════════════════════════════════════
+      // P0. RF уже достигнут
+      // ════════════════════════════════════════════════════════════════════════════
+      if (isRiskFree) {
+        log(`🏆 RF! A:${r2(Profit_A)}(${perc(Profit_A,I_total)}) B:${r2(Profit_B)}(${perc(Profit_B,I_total)})`);
+        return ret({ action: null, reason: 'risk-free locked' });
+      }
 
-    //     if (P_loser_raw <= riskFreeShotMaxPrice && P_loser_raw < 0.98) {
-    //       // Переопределяем локальные переменные для расчёта
-    //       const P_loser  = P_loser_raw;
-    //       const S_loser  = S_loser_raw;
-    //       const S_winner = S_winner_raw;
-    //       const dQ_min = (I_total - S_loser) / (1 - P_loser);   // минимум чтобы лузер покрыл I_total
-    //       const dQ_max = (S_winner - I_total) / P_loser;         // максимум чтобы winner всё ещё покрыл
+      // Бюджет исчерпан
+      // if (budgetLeft < 1) {
+      //   log(`💸 Бюджет исчерпан ($${r2(I_total)}/$${maxBudget}). Ждём GTC.`);
+      //   return ret({ action: null, reason: 'budget exhausted, waiting GTC' });
+      // }
 
-    //       if (dQ_max > 0 && (dQ_min <= 0 || dQ_min < dQ_max)) {
-    //         // Диапазон валиден — берём минимум + небольшой буфер profitTarget
-    //         const raw_dQ = Math.max(dQ_min, 0);
-    //         const buffered_dQ = raw_dQ / (1 - P_loser * (1 + profitTarget));
-    //         const dQ = Math.min(buffered_dQ > 0 ? buffered_dQ : raw_dQ + 0.5, dQ_max);
-    //         const buySize = Math.ceil(Math.max(dQ, 0.01) * 100) / 100;
+      // ════════════════════════════════════════════════════════════════════════════
+      // P_RISK. Risk Manager (Спасение от критического убытка >40%)
+      // ════════════════════════════════════════════════════════════════════════════
+      const RISK_THRESHOLD = -0.40; // Триггер: убыток больше 40% от I_total
+      const TARGET_LOSS    = -0.01; // Цель: вывести просадку на уровень 8%
+      const EXTRA_RESCUE_BUDGET = 35; // Экстренный бюджет на спасение (+20$)
 
-    //         const sim_S_loser  = S_loser  + buySize;
-    //         const sim_I_total  = I_total  + P_loser * buySize;
-    //         const sim_isRF     = (sim_S_loser - sim_I_total) > 0 && (S_winner - sim_I_total) > 0;
-
-    //         if (sim_isRF) {
-    //           const loserName  = loserIsA ? entry.name : hedge.name;
-    //           const loserAssetId = loserIsA ? entry.assetId : hedge.assetId;
-    //           log(`🎯 [P1b] Risk-free через лузера! ${loserName} x${buySize} @ ${P_loser} (avg было ${avgLoser_raw.toFixed(3)}, станет ${((I_loser_raw + P_loser * buySize) / sim_S_loser).toFixed(3)})`);
-    //           return ret({
-    //             action: {
-    //               type:    'buy',
-    //               assetId: loserAssetId,
-    //               name:    loserName,
-    //               size:    buySize,
-    //               price:   P_loser,
-    //               side:    'risk_free_shot',
-    //               reason:  `loser dropped to ${P_loser}, direct risk-free via averaging`,
-    //               nextTurn: nextTurn, // не меняем очередь — это внеплановая покупка
-    //               sim: {
-    //                 I_total:       sim_I_total,
-    //                 Profit_winner: S_winner   - sim_I_total,
-    //                 Profit_loser:  sim_S_loser - sim_I_total,
-    //                 isRiskFree:    sim_isRF,
-    //               },
-    //             }
-    //           });
-    //         }
-    //       }
-    //     }
-    //   }
-
-    //   // ─── Нет чёткого победителя (оба ~0.50) ─────────────────────────────────────
-    //   if (!winnerAsset || !loserAsset) {
-    //     log(`⏸ Нет чёткого победителя. P_A=${P_A} P_B=${P_B}`);
-    //     return ret({ action: null, reason: 'no clear winner', nextTurn });
-    //   }
-
-    //   // ─── Лимит капитала ─────────────────────────────────────────────────────────
-    //   const baseCapital = initialCapital ?? I_total;
-    //   const capitalLimit = baseCapital * maxCapitalMultiplier;
-    //   const isNearRiskFree = riskFreeProximity > -0.05;
-    //   if (I_total >= capitalLimit && !isNearRiskFree) {
-    //     log(`🛑 Лимит капитала. I_total=${I_total.toFixed(2)} лимит=${capitalLimit.toFixed(2)}`);
-    //     return ret({ action: null, reason: 'capital limit exceeded', nextTurn });
-    //   }
-
-    //   // ─── Хелпер: симуляция покупки ──────────────────────────────────────────────
-    //   const simulate = (side, price, size) => {
-    //     const dS_winner = side === 'winner' ? size : 0;
-    //     const dS_loser  = side === 'loser'  ? size : 0;
-    //     const new_S_winner = S_winner + dS_winner;
-    //     const new_S_loser  = S_loser  + dS_loser;
-    //     const new_I_total  = I_total  + price * size;
-    //     const pw = new_S_winner - new_I_total;
-    //     const pl = new_S_loser  - new_I_total;
-    //     return {
-    //       S_winner:          r2(new_S_winner),
-    //       S_loser:           r2(new_S_loser),
-    //       I_total:           r2(new_I_total),
-    //       Profit_winner:     r2(pw),
-    //       Profit_winner_perc: perc(pw, new_I_total),
-    //       Profit_loser:      r2(pl),
-    //       Profit_loser_perc: perc(pl, new_I_total),
-    //       isRiskFree: pw > 0 && pl > 0,
-    //     };
-    //   };
-
-    //   // ─── Хелпер: сколько shares winner нужно купить для risk-free ───────────────
-    //   // Условие: S_winner + dQ - (I_total + P*dQ) > 0 И S_loser - (I_total + P*dQ) > 0
-    //   // Из второго (более жёсткого): S_loser > I_total + P*dQ → dQ < (S_loser - I_total) / P
-    //   // Из первого: dQ > (I_total - S_winner) / (1 - P)
-    //   const calcRiskFreeSize = (price) => {
-    //     // Нужно: new_S_winner > new_I_total и new_S_loser > new_I_total
-    //     // new_S_loser = S_loser (не меняется при покупке winner)
-    //     // new_I_total = I_total + price * dQ
-    //     // Ограничение от лузера: S_loser > I_total + price*dQ → dQ < (S_loser - I_total) / price
-    //     const maxFromLoser = (S_loser - I_total) / price;
-    //     if (maxFromLoser <= 0) return null; // лузер слишком далеко от покрытия
-
-    //     // Нужно от winner: S_winner + dQ > I_total + price*dQ → dQ(1-price) > I_total - S_winner
-    //     const neededForWinner = (I_total - S_winner) / (1 - price);
-    //     if (neededForWinner < 0) {
-    //       // winner уже покрывает — нужен минимальный размер чтобы loser тоже покрыл
-    //       return null; // не должно быть — если winner покрывает но loser нет, то isRiskFree=false
-    //     }
-
-    //     // dQ должен быть в диапазоне [neededForWinner, maxFromLoser]
-    //     if (neededForWinner >= maxFromLoser) return null; // невозможно одной покупкой
-
-    //     // Берём чуть больше минимума с запасом profitTarget
-    //     const dQ = neededForWinner / (1 - price * (1 + profitTarget));
-    //     if (dQ <= 0 || dQ > maxFromLoser) return null;
-    //     return Math.ceil(dQ * 100) / 100; // округляем вверх
-    //   };
-
-    //   // ─── P1. Быстрый risk-free: можно одной покупкой winner? ───────────────────
-    //   // Проверяем если P_winner < 0.95 (есть смысл покупать) и loser уже близко к покрытию
-    //   if (P_winner < 0.95 && S_loser > I_total * 0.85) {
-    //     const rfSize = calcRiskFreeSize(P_winner);
-    //     if (rfSize !== null) {
-    //       const sim = simulate('winner', P_winner, rfSize);
-    //       if (sim.isRiskFree) {
-    //         log(`🚀 [P1] Risk-free одной покупкой! winner x${rfSize} @ ${P_winner}`);
-    //         return ret({
-    //           action: {
-    //             type: 'buy',
-    //             assetId: winnerAsset.assetId,
-    //             name:    winnerAsset.name,
-    //             size:    rfSize,
-    //             price:   P_winner,
-    //             side:    'winner',
-    //             reason:  'risk-free sprint: one buy to lock profit',
-    //             nextTurn: 'loser',
-    //             sim,
-    //           }
-    //         });
-    //       }
-    //     }
-    //   }
-
-    //   // ─── P2. Победитель убыточен → ONE SHOT до безубытка ──────────────────────
-    //   //
-    //   // Логика: если Profit_winner < 0, считаем ТОЧНОЕ количество shares чтобы
-    //   // выйти в безубыток по winner одной покупкой, и покупаем всё сразу.
-    //   //
-    //   // Формула безубытка:
-    //   //   new_S_winner = S_winner + dQ
-    //   //   new_I_total  = I_total + P_winner * dQ
-    //   //   Условие: new_S_winner >= new_I_total * (1 + profitTarget)
-    //   //   S_winner + dQ >= (I_total + P*dQ) * (1 + pt)
-    //   //   dQ * (1 - P*(1+pt)) >= I_total*(1+pt) - S_winner
-    //   //   dQ >= (I_total*(1+pt) - S_winner) / (1 - P*(1+pt))
-    //   //
-    //   // После этой покупки Profit_winner >= 0 и P2 больше не срабатывает.
-    //   // Лимит срабатываний не нужен — математика сама останавливает P2.
-    //   //
-    //   // Исключение: если P_winner >= 0.90 — слишком дорого для большой покупки,
-    //   // переходим к P3/P4 и ждём разворота через P1b.
-    //   const Profit_winner = S_winner - I_total;
-    //   if (Profit_winner < 0 && P_winner < 0.90) {
-    //     const denominator = 1 - P_winner * (1 + profitTarget);
-
-    //     let dQ_ideal;
-    //     if (denominator <= 0) {
-    //       dQ_ideal = 1;
-    //     } else {
-    //       // Точный размер для выхода в безубыток + profitTarget буфер
-    //       dQ_ideal = (I_total * (1 + profitTarget) - S_winner) / denominator;
-    //     }
-
-    //     // ── Кэп: защищаем P1b от уничтожения — только если P1b ещё возможен ────────
-    //     // P1b возможен только если S_loser > I_total (лузер может покрыть расходы).
-    //     // Если S_loser уже < I_total — P1b невозможен в любом случае, кэп не применяем.
-    //     // Если P1b ещё возможен — ограничиваем покупку чтобы не убить эту возможность:
-    //     //   new_I_total = I_total + P_winner*dQ <= S_loser * 0.95
-    //     //   dQ <= (S_loser * 0.95 - I_total) / P_winner
-    //     let dQ;
-    //     if (S_loser > I_total) {
-    //       // P1b ещё возможен — применяем кэп
-    //       const dQ_p1b_cap = (S_loser * 0.95 - I_total) / P_winner;
-    //       if (dQ_p1b_cap > 0.5) {
-    //         dQ = Math.min(dQ_ideal, dQ_p1b_cap);
-    //         if (dQ < dQ_ideal - 0.01) {
-    //           log(`🛡️ [P2] Кэп P1b: идеально x${dQ_ideal.toFixed(2)} → ограничено x${dQ.toFixed(2)} (S_loser=${S_loser.toFixed(2)} сохранён)`);
-    //         }
-    //       } else {
-    //         // Кэп слишком мал — P1b почти недостижим, покупаем идеально
-    //         dQ = dQ_ideal;
-    //       }
-    //     } else {
-    //       // S_loser < I_total — P1b уже невозможен, покупаем сколько нужно для breakeven
-    //       dQ = dQ_ideal;
-    //     }
-    //     const buySize = Math.ceil(dQ * 100) / 100;
-
-    //     const sim = simulate('winner', P_winner, buySize);
-    //     const capped = dQ < dQ_ideal - 0.01;
-
-    //     if (sim.Profit_winner >= 0) {
-    //       log(`⚡ [P2] ONE SHOT: ${winnerAsset.name} x${buySize} @ ${P_winner} → Profit_winner: +${sim.Profit_winner.toFixed(3)}${capped ? ' [capped для P1b]' : ''}`);
-    //     } else {
-    //       // Куплено меньше чем нужно для полного безубытка (из-за кэпа) — но всё равно покупаем
-    //       log(`⚡ [P2] PARTIAL: ${winnerAsset.name} x${buySize} @ ${P_winner} → Profit_winner: ${sim.Profit_winner.toFixed(3)} [P1b cap]`);
-    //     }
-
-    //     if (buySize > 0) {
-    //       return ret({
-    //         action: {
-    //           type:    'buy',
-    //           assetId: winnerAsset.assetId,
-    //           name:    winnerAsset.name,
-    //           size:    buySize,
-    //           price:   P_winner,
-    //           side:    'winner',
-    //           reason:  `P2 ${capped ? 'partial' : 'one-shot'}: ${Profit_winner.toFixed(3)} → ${sim.Profit_winner.toFixed(3)}${capped ? ' (P1b preserved)' : ''}`,
-    //           nextTurn: 'loser',
-    //           sim,
-    //         }
-    //       });
-    //     }
-    //     log(`⚠️ [P2] buySize=0, передаём в P3/P4`);
-    //   }
-
-    //   // ─── P3/P4. Стандартное чередование ────────────────────────────────────────
-    //   let actionAsset, actionPrice, actionSide, actionReason;
-    //   let nextTurnAfter = nextTurn;
-
-    //   if (nextTurn === 'winner') {
-    //     if (P_winner >= 0.98) {
-    //       // Winner заблокирован — экстренно покупаем лузера если дёшев
-    //       if (P_loser <= 0.20) {
-    //         actionAsset   = loserAsset;
-    //         actionPrice   = P_loser;
-    //         actionSide    = 'loser';
-    //         actionReason  = 'winner blocked, emergency loser buy';
-    //         nextTurnAfter = 'winner';
-    //       } else {
-    //         return ret({ action: null, reason: 'winner >= 0.98, loser not cheap', nextTurn });
-    //       }
-    //     } else {
-    //       // Стандартная докупка winner
-    //       const denominator = 1 - P_winner * (1 + profitTarget);
-    //       const needed = profitTarget * I_total - Profit_winner;
-    //       let dQ;
-    //       if (needed <= 0) {
-    //         dQ = 0.5 / P_winner; // профит уже выполнен — минимальная докупка
-    //       } else if (denominator <= 0) {
-    //         dQ = 0.5 / P_winner;
-    //       } else {
-    //         dQ = needed / denominator;
-    //       }
-    //       const maxBuy = Math.max(S_winner * 0.20, 1);
-    //       actionAsset   = winnerAsset;
-    //       actionPrice   = P_winner;
-    //       actionSide    = 'winner';
-    //       actionReason  = 'scheduled winner buy';
-    //       nextTurnAfter = 'loser';
+      for (const side of [sideA, sideB]) {
+        // Проверяем, если потенциальный профит при победе этой стороны <= -40% от всех вложенных средств
+        if (side.profit <= RISK_THRESHOLD * I_total) {
+          log(`⚠️ ВНИМАНИЕ: Критический риск по ${side.name}! Убыток: ${perc(side.profit, I_total)}. Включаем Risk Manager!`);
           
-    //       const buySize = Math.round(Math.min(dQ, maxBuy) * 100) / 100;
-    //       const sim = simulate('winner', P_winner, buySize);
-    //       log(`🛒 [P3] WINNER: ${winnerAsset.name} x${buySize} @ ${P_winner}`);
-    //       return ret({
-    //         action: {
-    //           type: 'buy', assetId: winnerAsset.assetId, name: winnerAsset.name,
-    //           size: buySize, price: P_winner, side: 'winner',
-    //           reason: actionReason, nextTurn: nextTurnAfter, sim,
-    //         }
-    //       });
-    //     }
+          if (side.price < 0.98) {
+             const numerator = TARGET_LOSS * I_total - side.profit;
+             const denominator = 1 - side.price * (1 + TARGET_LOSS);
+             
+             if (denominator > 0) {
+               let requiredShares = numerator / denominator;
+               let buySize = Math.ceil(requiredShares * 100) / 100;
+               let cost = r2(buySize * side.price);
+               
+               // Доступный бюджет для спасения: то, что осталось от базы + 20 экстренных долларов
+               const rescueBudget = budgetLeft + EXTRA_RESCUE_BUDGET;
+               
+               // Если стоимость спасения превышает расширенный бюджет — выкупаем на максимум доступного
+               if (cost > rescueBudget) {
+                 log(`⚠️ Не хватает расширенного бюджета (нужно $${cost}, доступно $${r2(rescueBudget)} с учетом экстренных $${EXTRA_RESCUE_BUDGET}). Используем всё доступное.`);
+                 cost = rescueBudget;
+                 buySize = Math.floor((cost / side.price) * 100) / 100;
+               }
 
-    //   } else {
-    //     // nextTurn === 'loser'
-    //     if (P_loser >= 0.98) {
-    //       return ret({ action: null, reason: 'loser >= 0.98', nextTurn });
-    //     }
-    //     if (P_loser > 0.20) {
-    //       // Лузер не дешёвый — ЖДЁМ. Не делаем fallback на winner.
-    //       log(`⏳ [P4] Ждём лузера ≤ 0.20. P_loser=${P_loser.toFixed(3)}`);
-    //       return ret({ action: null, reason: `waiting loser <= 0.20, now: ${P_loser.toFixed(3)}`, nextTurn: 'loser' });
-    //     }
-    //     // Лузер дешёвый — покупаем страховку
-    //     actionAsset   = loserAsset;
-    //     actionPrice   = P_loser;
-    //     actionSide    = 'loser';
-    //     actionReason  = 'scheduled loser insurance buy';
-    //     nextTurnAfter = 'winner';
-    //   }
+               // Защита от отрицательных покупок (если спасательный бюджет уже полностью выжран)
+               if (buySize >= minSize(side.price) && cost > 0) {
+                 const sim = simulate(side.assetId, side.price, buySize);
+                 log(`🚑 Спасение ${side.name}: FOK покупка x${buySize} @ ${side.price} на $${r2(buySize * side.price)}. Новый профит: A:${sim.Profit_A} B:${sim.Profit_B}`);
+                 
+                 return ret({
+                   action: {
+                     type:       'buy',
+                     assetId:    side.assetId,
+                     name:       side.name,
+                     size:       buySize,
+                     amount:     r2(buySize * side.price),
+                     price:      side.price,
+                     order_type: 'FOK', 
+                     reason:     `Risk Manager: Rescue ${side.name} @ ${side.price}`,
+                     sim,
+                   }
+                 });
+               }
+            }
+          }
+        }
+      }
 
-    //   // ─── Расчёт размера для лузера ──────────────────────────────────────────────
-    //   const budgetForLoser = Profit_winner - profitTarget * I_total;
-    //   let loserBuySize;
-    //   if (budgetForLoser > 0) {
-    //     loserBuySize = Math.round(Math.min(
-    //       budgetForLoser / (actionPrice * (1 + profitTarget)),
-    //       Math.max(S_winner * 0.30, 1)
-    //     ) * 100) / 100;
-    //   } else {
-    //     loserBuySize = Math.round(Math.min(0.30 / actionPrice, Math.max(S_winner * 0.30, 1)) * 100) / 100;
-    //   }
+      // ════════════════════════════════════════════════════════════════════════════
+      // Проверка на исчерпанный базовый бюджет (перенесена СЮДА)
+      // ════════════════════════════════════════════════════════════════════════════
+      if (budgetLeft < 1) {
+        log(`💸 Бюджет исчерпан ($${r2(I_total)}/$${maxBudget}). Ждём GTC.`);
+        return ret({ action: null, reason: 'budget exhausted, waiting GTC' });
+      }
 
-    //   if (loserBuySize <= 0) {
-    //     return ret({ action: null, reason: 'loser buySize = 0', nextTurn });
-    //   }
+      // ⬆️ КОНЕЦ БЛОКА RISK MANAGER И ПРОВЕРКИ БЮДЖЕТА ⬆️      
 
-    //   const sim = simulate(actionSide, actionPrice, loserBuySize);
-    //   log(`🛒 [P4] LOSER: ${actionAsset.name} x${loserBuySize} @ ${actionPrice}`);
+      // ════════════════════════════════════════════════════════════════════════════
+      // P1. RF по текущей цене — FOK прямо сейчас
+      // ════════════════════════════════════════════════════════════════════════════
+      for (const side of [sideA, sideB]) {
+        const other  = side === sideA ? sideB : sideA;
+        const rfSize = calcRFSize(side.assetId, side.price, side.profit, other.profit);
+        if (rfSize !== null) {
+          const sim = simulate(side.assetId, side.price, rfSize);
+          log(`🎯 P1 RF: ${side.name} x${rfSize} @ ${side.price} → A:${sim.Profit_A} B:${sim.Profit_B}`);
+          return ret({
+            action: {
+              type:       'buy',
+              assetId:    side.assetId,
+              name:       side.name,
+              size:       rfSize,
+              amount:     r2(rfSize * side.price),
+              price:      side.price,
+              order_type: 'FOK',
+              reason:     `P1 RF via ${side.name} @ ${side.price}`,
+              sim,
+            }
+          });
+        }
+      }
 
-    //   return ret({
-    //     action: {
-    //       type: 'buy',
-    //       assetId: actionAsset.assetId,
-    //       name:    actionAsset.name,
-    //       size:    loserBuySize,
-    //       price:   actionPrice,
-    //       side:    actionSide,
-    //       reason:  actionReason,
-    //       nextTurn: nextTurnAfter,
-    //       sim,
-    //     }
-    //   });
-    // }  
+      // ════════════════════════════════════════════════════════════════════════════
+      // P2. GTC по текущей цене проигрывающей стороны
+      //     Если уже есть активный GTC — пропускаем P2 и P3
+      // ════════════════════════════════════════════════════════════════════════════
+      // const hasActiveGTC = loser.pos.activeGTC === true;
 
-    /**
-     * recalculate — Gabagool-style binary market hedging strategy
-     *
-     * ЛОГИКА ПРИОРИТЕТОВ (в порядке убывания):
-     *
-     *  P0. Risk-free уже достигнут → стоп
-     *  P1. Можно достичь risk-free одной докупкой победителя → ДЕЛАЕМ (независимо от nextTurn)
-     *  P2. Победитель убыточен (Profit_winner < 0) → ONE SHOT: покупаем ровно столько чтобы выйти в безубыток
-     *  P3. nextTurn='winner' → докупаем победителя (стандартное чередование)
-     *  P4. nextTurn='loser'  → ждём пока loser ≤ 0.20, затем покупаем страховку
-     *
-     * Дополнительно:
-     *  - Если цена победителя < 0.48 — проверяем возможность быстрого risk-free через него
-     *  - Лузер покупается только при цене ≤ 0.20 (дёшево = хорошая страховка)
-     *  - nextTurn управляет чередованием, но НЕ блокирует приоритетные покупки (P1, P2)
-     *
-     * @param {object} params
-     * @param {Array}  params.positions           — текущие позиции [{ asset, size, initialValue }]
-     * @param {object} params.entry               — первый исход { assetId, name }
-     * @param {object} params.hedge               — второй исход { assetId, name }
-     * @param {object} params.opp                 — рынок { id, outcomes, rawEndDate }
-     * @param {string} params.nextTurn            — 'winner' | 'loser' (управляется снаружи)
-     * @param {number} [params.profitTarget=0.05] — минимальный профит победителя (доля от I_total)
-     * @param {number} [params.initialCapital]    — I_A+I_B при первом запуске. Передавать снаружи!
-     * @param {number} [params.maxCapitalMultiplier=3]
-     * @param {number} [params.takerFeeBps=1000]  — комиссия в bps (из маркета: takerBaseFee). Реальная: p*(1-p)*bps/10000
-     * @param {Function} [params.pushMarketLog]
-     * @param {Function} [params.onSignal]
-     */
-    /**
-     * recalculate — Gabagool-style binary market hedging strategy
-     *
-     * ЛОГИКА ПРИОРИТЕТОВ (в порядке убывания):
-     *
-     *  P0. Risk-free уже достигнут → стоп
-     *  P1. Можно достичь risk-free одной докупкой победителя → ДЕЛАЕМ (независимо от nextTurn)
-     *  P2. Победитель убыточен (Profit_winner < 0) → ONE SHOT: покупаем ровно столько чтобы выйти в безубыток
-     *  P3. nextTurn='winner' → докупаем победителя (стандартное чередование)
-     *  P4. nextTurn='loser'  → ждём пока loser ≤ 0.20, затем покупаем страховку
-     *
-     * Дополнительно:
-     *  - Если цена победителя < 0.48 — проверяем возможность быстрого risk-free через него
-     *  - Лузер покупается только при цене ≤ 0.20 (дёшево = хорошая страховка)
-     *  - nextTurn управляет чередованием, но НЕ блокирует приоритетные покупки (P1, P2)
-     *
-     * @param {object} params
-     * @param {Array}  params.positions           — текущие позиции [{ asset, size, initialValue }]
-     * @param {object} params.entry               — первый исход { assetId, name }
-     * @param {object} params.hedge               — второй исход { assetId, name }
-     * @param {object} params.opp                 — рынок { id, outcomes, rawEndDate }
-     * @param {string} params.nextTurn            — 'winner' | 'loser' (управляется снаружи)
-     * @param {number} [params.profitTarget=0.05] — минимальный профит победителя (доля от I_total)
-     * @param {number} [params.initialCapital]    — I_A+I_B при первом запуске. Передавать снаружи!
-     * @param {number} [params.maxCapitalMultiplier=3]
-     * @param {number} [params.takerFeeBps=1000]  — комиссия в bps (из маркета: takerBaseFee). Реальная: p*(1-p)*bps/10000
-     * @param {Function} [params.pushMarketLog]
-     * @param {Function} [params.onSignal]
-     */
+      if (!hasActiveGTC && loser.price < 0.98) {
+        const gtcSize = calcRFSize(loser.assetId, loser.price, loser.profit, winner.profit);
+
+        if (gtcSize !== null) {
+          const sim = simulate(loser.assetId, loser.price, gtcSize);
+          // Помечаем что GTC выставлен — снять флаг нужно снаружи когда ордер исполнится/отменится
+          // loser.pos.activeGTC = true;
+          // loser.pos.activeGTCPrice = loser.price;
+          log(`📋 P2 GTC: ${loser.name} x${gtcSize} @ ${loser.price} → A:${sim.Profit_A} B:${sim.Profit_B}`);
+          return ret({
+            action: {
+              type:       'buy',
+              assetId:    loser.assetId,
+              name:       loser.name,
+              size:       gtcSize,
+              amount:     r2(gtcSize * loser.price),
+              price:      loser.price,
+              order_type: 'GTC',
+              reason:     `P2 GTC: ${loser.name} @ ${loser.price}`,
+              sim,
+            }
+          });
+        }
+        log(`⏳ P2 RF недостижим через ${loser.name} @ ${loser.price}`);
+      }
+
+      // ════════════════════════════════════════════════════════════════════════════
+      // P3. Grid averaging — только если нет активного GTC
+      //     Сетка -10% от стартовой цены проигрывающей стороны
+      //     $1 на каждом уровне
+      // ════════════════════════════════════════════════════════════════════════════
+      if (!hasActiveGTC) {
+        // Инициализация сетки
+        if (!loser.pos.gridStartPrice) {
+          loser.pos.gridStartPrice = loser.price;
+          loser.pos.gridLevels = buildGrid(loser.price);
+          log(`🗂 P3 Grid init: ${loser.name} start @ ${loser.price}, уровни: ${loser.pos.gridLevels.map(l => l.price).join(', ')}`);
+        }
+
+        // Следующий нетронутый уровень который уже достигнут
+        const nextLevel = loser.pos.gridLevels.find(l => !l.triggered && loser.price <= l.price);
+
+        if (nextLevel && loser.price < 0.98) {
+          const buySize = r2(Math.ceil((1.0 / loser.price) * 100) / 100); // ~$1
+          const cost    = r2(buySize * loser.price);
+
+          if (cost <= budgetLeft) {
+            nextLevel.triggered = true;
+            const sim = simulate(loser.assetId, loser.price, buySize);
+            log(`📉 P3 Grid: ${loser.name} x${buySize} @ ${loser.price} (уровень ${nextLevel.price}, $${cost}) осталось: $${r2(budgetLeft - cost)}`);
+            return ret({
+              action: {
+                type:       'buy',
+                assetId:    loser.assetId,
+                name:       loser.name,
+                size:       buySize,
+                amount:     cost,
+                price:      loser.price,
+                order_type: 'FOK',
+                reason:     `P3 grid ${nextLevel.price}: ${loser.name} @ ${loser.price}`,
+                sim,
+              }
+            });
+          }
+        }
+      } else {
+        // log(`⏸ P3 Grid пропущен — есть активный GTC @ ${loser.pos.activeGTCPrice}`);
+        log(`⏸ P3 Grid пропущен — есть активный GTC`);
+      }
+
+      // ════════════════════════════════════════════════════════════════════════════
+      // P4. Явный лидер >= 0.66 — докупаем до +5%
+      // ════════════════════════════════════════════════════════════════════════════
+      
+      // // ════════════════════════════════════════════════════════════════════════════
+      // // P4. Явный лидер >= 0.66 — докупаем до +15% (работает только до $53 в банке!)
+      // // ════════════════════════════════════════════════════════════════════════════
+      // const LEADER_THRESHOLD = 0.66;
+      // const P4_MAX_BUDGET = 53; // 🛑 Лимит банка для агрессивного заработка
+
+      // const leader = P_A >= LEADER_THRESHOLD ? sideA : P_B >= LEADER_THRESHOLD ? sideB : null;
+
+      // // Добавлено условие: I_total < P4_MAX_BUDGET
+      // if (leader && leader.price < 0.98 && I_total < P4_MAX_BUDGET) {
+      //   const targetProfit = I_total * ARBITRAGE_PROFIT_PERCENT;
+
+      //   if (leader.profit < targetProfit) {
+      //     const needed  = (targetProfit - leader.profit) / (1 - leader.price);
+      //     const buySize = r2(Math.max(minSize(leader.price), Math.ceil(needed * 100) / 100));
+      //     const cost    = r2(buySize * leader.price);
+
+      //     if (cost <= budgetLeft) {
+      //       const sim = simulate(leader.assetId, leader.price, buySize);
+      //       log(`📈 P4 Лидер ${leader.name} @ ${leader.price}, x${buySize} до +15%`);
+      //       return ret({
+      //         action: {
+      //           type:       'buy',
+      //           assetId:    leader.assetId,
+      //           name:       leader.name,
+      //           size:       buySize,
+      //           amount:     cost,
+      //           price:      leader.price,
+      //           order_type: 'FOK',
+      //           reason:     `P4 leader ${leader.name} @ ${leader.price}`,
+      //           sim,
+      //         }
+      //       });
+      //     }
+      //   }
+      // } else if (leader && I_total >= P4_MAX_BUDGET) {
+      //   // Опциональный лог: бот увидел лидера, но банк уже слишком раздут
+      //   // log(`⏸ P4 пропущен: банк раздут ($${I_total}), перешли в режим минимизации рисков`);
+      // }      
+
+      const LEADER_THRESHOLD = 0.62;
+      const leader = P_A >= LEADER_THRESHOLD ? sideA : P_B >= LEADER_THRESHOLD ? sideB : null;
+
+      if (leader && leader.price < 0.98) {
+        const targetProfit = I_total * ARBITRAGE_PROFIT_PERCENT;
+
+        if (leader.profit < targetProfit) {
+          const needed  = (targetProfit - leader.profit) / (1 - leader.price);
+          const buySize = r2(Math.max(minSize(leader.price), Math.ceil(needed * 100) / 100));
+          const cost    = r2(buySize * leader.price);
+
+          if (cost <= budgetLeft) {
+            const sim = simulate(leader.assetId, leader.price, buySize);
+            log(`📈 P4 Лидер ${leader.name} @ ${leader.price}, x${buySize} до +5%`);
+            return ret({
+              action: {
+                type:       'buy',
+                assetId:    leader.assetId,
+                name:       leader.name,
+                size:       buySize,
+                amount:     cost,
+                price:      leader.price,
+                order_type: 'FOK',
+                reason:     `P4 leader ${leader.name} @ ${leader.price}`,
+                sim,
+              }
+            });
+          }
+        }
+      }
+
+      // ════════════════════════════════════════════════════════════════════════════
+      // P5. Ждём
+      // ════════════════════════════════════════════════════════════════════════════
+      log(`⏸ Ждём. A:${r2(Profit_A)}(${perc(Profit_A,I_total)}) B:${r2(Profit_B)}(${perc(Profit_B,I_total)}) budget:$${r2(budgetLeft)}`);
+      return ret({ action: null, reason: `waiting. P_A:${P_A} P_B:${P_B}` });
+    }
+
+
+    // стратегия варианты
+    // 1) Цена входа 0.34, можно попробовать поднять цену входа на 0.42
+    // 2) Время входа, можно попробовать увеличить
+    // 3) Профит по исходам, можно попробовать увеличить
+    // 4) Максимальный бюджет, можно попробовать расширить до 100
+    // 5) Количество изначальных shares 20, можно увеличить
+
     // рабочая
     // function recalculate({
     //   positions,
     //   entry,
     //   hedge,
+    //   gridState,
+    //   hasActiveGTC = false,
     //   opp,
-    //   nextTurn = 'winner',
-    //   profitTarget = 0.05,
-    //   maxCapitalMultiplier = 3,
-    //   initialCapital,
-    //   takerFeeBps = 1000,   // из маркета: takerBaseFee (только если feesEnabled=true)
-    //   feeExponent = 2,      // из маркета: crypto=2, sports=1
-    //   feesEnabled = false,  // из маркета: feesEnabled. Если false — fee=0
+    //   nextTurn = 'loser',
+    //   profitTarget = PROFIT_PERCENT,
+    //   // maxBudget = 85, в целом норм
+    //   // maxBudget = 46, бюджета не хватает если входить по 0.20. Много событий которые не докупались и в итоге общий результат в минус
+    //   maxBudget = 100,
+    //   pushMarketLog,
+    //   onSignal,
     // } = {}) {
 
-    //   // ─── Расчёт реальной комиссии ────────────────────────────────────────────────
-    //   // Официальная формула Polymarket (docs.polymarket.com/fees):
-    //   //   fee = C × p × feeRate × (p × (1-p))^exponent
-    //   //   C = shares, p = price
-    //   //
-    //   // Параметры по типу рынка:
-    //   //   Crypto:  feeRate=0.25, exponent=2  → макс 1.56% при p=0.50
-    //   //   Sports:  feeRate=0.175, exponent=1
-    //   //   Другие:  feesEnabled=false → fee=0
-    //   //
-    //   // Примеры (Crypto, 100 shares):
-    //   //   p=0.50 → fee=$0.78 (1.56%)
-    //   //   p=0.60 → fee=$0.86 (1.44%)
-    //   //   p=0.42 → fee=$0.58 (1.44%)
-    //   //   p=0.19 → fee=$0.13 (0.64%)
-    //   //   p=0.05 → fee=$0.003 (0.06%)
-    //   const calcFee = (price, size, feeBps, exponent) => {
-    //     if (!feesEnabled) return 0;
-    //     const feeRate = feeBps / 10000;
-    //     const fee = size * price * feeRate * Math.pow(price * (1 - price), exponent);
-    //     return Math.round(fee * 10000) / 10000;
-    //   };
+    //   const log     = (text) => { pushMarketLog?.(opp.id, text); onSignal?.({ type: 'bidding', opp, text }); };
 
-    //   // ─── Проверка: улучшает ли покупка pairCost с учётом комиссии? ──────────────
-    //   //
-    //   // pairCost = avg_A + avg_B  (хотим чтобы он снижался)
-    //   //
-    //   // После покупки side на dQ shares по цене P с учётом fee:
-    //   //   real_cost = P * dQ + fee           ← реальные затраты включая комиссию
-    //   //   new_avg_side = (I_side + real_cost) / (S_side + dQ)
-    //   //
-    //   // Покупка улучшает pairCost если new_avg_side < текущий avg_side
-    //   // То есть: цена покупки с учётом fee < текущей средней цены этого исхода
-    //   //
-    //   // Для winner (avg_side = avg_winner):
-    //   //   new_avg_winner = (I_winner + real_cost) / (S_winner + dQ) < avg_winner
-    //   //   → real_cost / dQ < avg_winner
-    //   //   → P * (1 + feeRate) < avg_winner
-    //   //
-    //   // Для loser аналогично.
-    //   //
-    //   // Если покупка НЕ улучшает pairCost — логируем предупреждение но НЕ блокируем:
-    //   //   P1/P2 (приоритетные) — выполняем в любом случае, это математическая необходимость
-    //   //   P3/P4 (плановые)     — предупреждаем, но тоже выполняем (может не быть лучшей цены)
-    //   const checkPairCostImprovement = (side, price, size, label) => {
-    //     const fee = calcFee(price, size, takerFeeBps, feeExponent);
-    //     const realCostPerShare = (price * size + fee) / size; // реальная цена с fee
+    //   try {
+    //     const r2      = (n) => Math.round(n * 100) / 100;
+    //     const perc    = (profit, total) => `${((profit / total) * 100).toFixed(1)}%`;
+    //     const minSize = (price) => Math.ceil((1.0 / price) * 100) / 100;
 
-    //     const avg_side = side === 'winner'
-    //       ? (S_winner > 0 ? (winnerAsset.assetId === entry.assetId ? I_A : I_B) / S_winner : price)
-    //       : (S_loser  > 0 ? (loserAsset.assetId  === entry.assetId ? I_A : I_B) / S_loser  : price);
+    //     // ─── Валидация ───────────────────────────────────────────────────────────────
+    //     const entryPos = positions.find(p => p.asset === entry.assetId);
+    //     const hedgePos = positions.find(p => p.asset === hedge.assetId);
+    //     if (!entryPos || !hedgePos) { log(`❌ позиции не найдены`); return { error: 'позиции не найдены' }; }
 
-    //     const improves = realCostPerShare < avg_side;
-    //     const feeRate  = calcFee(price, size, takerFeeBps, feeExponent) / (price * size);
+    //     const S_A     = Number(entryPos.size);
+    //     const S_B     = Number(hedgePos.size);
+    //     const I_A     = Number(entryPos.initialValue);
+    //     const I_B     = Number(hedgePos.initialValue);
+    //     const I_total = I_A + I_B;
 
-    //     if (!improves) {
-    //       log(`💸 [${label}] pairCost НЕ улучшится: реальная цена ${realCostPerShare.toFixed(3)} ≥ avg_${side} ${avg_side.toFixed(3)} (fee=${(feeRate*100).toFixed(1)}%)`);
-    //     } else {
-    //       log(`✅ [${label}] pairCost улучшится: ${realCostPerShare.toFixed(3)} < avg_${side} ${avg_side.toFixed(3)} (fee=${(feeRate*100).toFixed(1)}%)`);
-    //     }
-    //     return { improves, realCostPerShare, avg_side, fee, feeRate };
-    //   };
+    //     const P_A = Number(opp.outcomes.find(o => o.assetId === entry.assetId)?.price ?? 0);
+    //     const P_B = Number(opp.outcomes.find(o => o.assetId === hedge.assetId)?.price ?? 0);
+    //     if (!P_A || !P_B) { log(`❌ цены не найдены`); return { error: 'цены не найдены' }; }
+    //     if (S_A <= 0 || S_B <= 0) { log(`❌ размеры позиций = 0`); return { error: 'размеры позиций = 0' }; }
 
-    //   const nowTime = () => new Date().toISOString().slice(11, 19);
-    //   const log = (text) => { pushMarketLog?.(opp.id, text); onSignal?.({ type: 'bidding', opp, text }); };
+    //     const budgetLeft = maxBudget - I_total;
 
-    //   // ─── 1. Валидация ───────────────────────────────────────────────────────────
-    //   const entryPos = positions.find(p => p.asset === entry.assetId);
-    //   const hedgePos = positions.find(p => p.asset === hedge.assetId);
-    //   if (!entryPos || !hedgePos) { log(`❌ позиции не найдены`); return null; }
+    //     // ─── Текущее состояние ───────────────────────────────────────────────────────
+    //     const Profit_A   = S_A - I_total;
+    //     const Profit_B   = S_B - I_total;
+    //     const isRiskFree = Profit_A > 0 && Profit_B > 0;
 
-    //   const S_A = Number(entryPos.size);
-    //   const S_B = Number(hedgePos.size);
-    //   const I_A = Number(entryPos.initialValue);
-    //   const I_B = Number(hedgePos.initialValue);
-    //   const I_total = I_A + I_B;
-    //   const avg_A = S_A > 0 ? I_A / S_A : 0;
-    //   const avg_B = S_B > 0 ? I_B / S_B : 0;
-    //   const pairCost = avg_A + avg_B;
-
-    //   // ─── 2. Текущие цены ────────────────────────────────────────────────────────
-    //   const P_A = Number(opp.outcomes.find(o => o.assetId === entry.assetId)?.price ?? 0);
-    //   const P_B = Number(opp.outcomes.find(o => o.assetId === hedge.assetId)?.price ?? 0);
-    //   if (!P_A || !P_B) { log(`❌ цены не найдены`); return null; }
-
-    //   // ─── 3. Прибыль при каждом исходе ──────────────────────────────────────────
-    //   const Profit_A = S_A - I_total;
-    //   const Profit_B = S_B - I_total;
-    //   const isRiskFree = Profit_A > 0 && Profit_B > 0;
-    //   const riskFreeProximity = Math.min(Profit_A, Profit_B) / I_total;
-
-    //   // ─── 4. Определяем победителя ───────────────────────────────────────────────
-    //   // Победитель = исход с ценой > 0.52 (более мягкий порог чем 0.65)
-    //   // Это позволяет реагировать раньше при движении цены
-    //   const winnerAsset = P_A > 0.52 ? entry : (P_B > 0.52 ? hedge : null);
-    //   const loserAsset  = P_A > 0.52 ? hedge : (P_B > 0.52 ? entry : null);
-
-    //   const P_winner = winnerAsset?.assetId === entry.assetId ? P_A : P_B;
-    //   const P_loser  = loserAsset?.assetId  === entry.assetId ? P_A : P_B;
-    //   const S_winner = winnerAsset?.assetId === entry.assetId ? S_A : S_B;
-    //   const S_loser  = loserAsset?.assetId  === entry.assetId ? S_A : S_B;
-
-    //   // ─── Стейт для возвратов ────────────────────────────────────────────────────
-    //   const r2 = (n) => Math.round(n * 100) / 100; // округление до 2 знаков
-    //   const perc = (profit, total) => `${((profit / total) * 100).toFixed(1)}%`;
-
-    //   const state = {
-    //     S_A, S_B, I_A, I_B,
-    //     I_total:            r2(I_total),
-    //     avg_A:              r2(avg_A),
-    //     avg_B:              r2(avg_B),
-    //     pairCost:           r2(pairCost),
-    //     P_A, P_B,
-    //     Profit_A:           r2(Profit_A),
-    //     Profit_A_perc:      perc(Profit_A, I_total),
-    //     Profit_B:           r2(Profit_B),
-    //     Profit_B_perc:      perc(Profit_B, I_total),
-    //     isRiskFree, riskFreeProximity,
-    //     nextTurn,
-    //   };
-    //   const ret = (extra) => ({ ...state, ...extra });
-
-    //   // ─── P0. Risk-free уже достигнут ────────────────────────────────────────────
-    //   if (isRiskFree) {
-    //     log(`🏆 Risk-free! Profit_A=${Profit_A.toFixed(3)} Profit_B=${Profit_B.toFixed(3)}`);
-    //     return ret({ action: null, reason: 'risk-free locked' });
-    //   }
-
-    //   // ─── P1b. Risk-free через докупку ЛУЗЕРА ───────────────────────────────────
-    //   //
-    //   // Идея: если лузер подешевел — можно усреднить его цену вниз и выйти в risk-free.
-    //   //
-    //   // Условие risk-free после докупки лузера на dQ shares:
-    //   //   new_S_loser  = S_loser + dQ
-    //   //   new_I_total  = I_total + P_loser * dQ
-    //   //   Нужно: (new_S_loser  - new_I_total) > 0  →  dQ > (I_total - S_loser) / (1 - P_loser)
-    //   //          (S_winner     - new_I_total) > 0  →  dQ < (S_winner - I_total) / P_loser
-    //   //
-    //   // Если дешевеет до ≤ riskFreeShotMaxPrice и диапазон dQ непустой — стреляем!
-    //   {
-    //     // Порог P1b: лузер должен стоить < 0.48.
-    //     // Никакого динамического порога — он сам себя снижал после каждой покупки лузера.
-    //     // Единственный реальный фильтр: математическая проверка что RF достижим (dQ_min < dQ_max).
-    //     const loserIsA  = P_A < P_B; // A=entry дешевле → он лузер
-    //     const I_loser_raw = loserIsA ? I_A : I_B;
-    //     const S_loser_raw = loserIsA ? S_A : S_B;
-    //     const P_loser_raw = loserIsA ? P_A : P_B;
-    //     const S_winner_raw = loserIsA ? S_B : S_A;
-    //     const avgLoser_raw  = S_loser_raw > 0 ? I_loser_raw / S_loser_raw : 1;
-    //     const riskFreeShotMaxPrice = 0.48; // фиксированный порог — математика сама отфильтрует невозможные случаи
-
-    //     if (P_loser_raw <= riskFreeShotMaxPrice && P_loser_raw < 0.98) {
-    //       // Переопределяем локальные переменные для расчёта
-    //       const P_loser  = P_loser_raw;
-    //       const S_loser  = S_loser_raw;
-    //       const S_winner = S_winner_raw;
-    //       const dQ_min = (I_total - S_loser) / (1 - P_loser);   // минимум чтобы лузер покрыл I_total
-    //       const dQ_max = (S_winner - I_total) / P_loser;         // максимум чтобы winner всё ещё покрыл
-
-    //       if (dQ_max > 0 && (dQ_min <= 0 || dQ_min < dQ_max)) {
-    //         // Диапазон валиден — берём минимум + небольшой буфер profitTarget
-    //         const raw_dQ = Math.max(dQ_min, 0);
-    //         const buffered_dQ = raw_dQ / (1 - P_loser * (1 + profitTarget));
-    //         const dQ = Math.min(buffered_dQ > 0 ? buffered_dQ : raw_dQ + 0.5, dQ_max);
-    //         const buySize = Math.ceil(Math.max(dQ, 0.01) * 100) / 100;
-
-    //         const sim_S_loser  = S_loser  + buySize;
-    //         const sim_fee      = calcFee(P_loser, buySize, takerFeeBps, feeExponent);
-    //         const sim_I_total  = I_total  + P_loser * buySize + sim_fee;
-    //         const sim_pw       = S_winner    - sim_I_total;
-    //         const sim_pl       = sim_S_loser - sim_I_total;
-    //         const sim_isRF     = sim_pw > 0 && sim_pl > 0;
-
-    //         if (sim_isRF) {
-    //           const loserName    = loserIsA ? entry.name : hedge.name;
-    //           const loserAssetId = loserIsA ? entry.assetId : hedge.assetId;
-    //           log(`🎯 [P1b] Risk-free через лузера! ${loserName} x${buySize} @ ${P_loser} fee:${sim_fee.toFixed(4)} (avg было ${avgLoser_raw.toFixed(3)}, станет ${((I_loser_raw + P_loser * buySize) / sim_S_loser).toFixed(3)})`);
-    //           return ret({
-    //             action: {
-    //               type:       'buy',
-    //               assetId:    loserAssetId,
-    //               name:       loserName,
-    //               size:       buySize,
-    //               price:      P_loser,
-    //               side:       'risk_free_shot',
-    //               order_type: 'FOK',
-    //               reason:     `loser dropped to ${P_loser}, direct risk-free via averaging`,
-    //               nextTurn:   nextTurn,
-    //               sim: {
-    //                 I_total:            r2(sim_I_total),
-    //                 fee:                sim_fee,
-    //                 fee_perc:           `${(sim_fee / (P_loser * buySize) * 100).toFixed(2)}%`,
-    //                 Profit_winner:      r2(sim_pw),
-    //                 Profit_winner_perc: perc(sim_pw, sim_I_total),
-    //                 Profit_loser:       r2(sim_pl),
-    //                 Profit_loser_perc:  perc(sim_pl, sim_I_total),
-    //                 isRiskFree:         sim_isRF,
-    //               },
-    //             }
-    //           });
-    //         }
-    //       }
-    //     }
-    //   }
-
-    //   // ─── Нет чёткого победителя (оба ~0.50) ─────────────────────────────────────
-    //   if (!winnerAsset || !loserAsset) {
-    //     log(`⏸ Нет чёткого победителя. P_A=${P_A} P_B=${P_B}`);
-    //     return ret({ action: null, reason: 'no clear winner', nextTurn });
-    //   }
-
-    //   // ─── Лимит капитала ─────────────────────────────────────────────────────────
-    //   const baseCapital = initialCapital ?? I_total;
-    //   const capitalLimit = baseCapital * maxCapitalMultiplier;
-    //   const isNearRiskFree = riskFreeProximity > -0.05;
-    //   if (I_total >= capitalLimit && !isNearRiskFree) {
-    //     log(`🛑 Лимит капитала. I_total=${I_total.toFixed(2)} лимит=${capitalLimit.toFixed(2)}`);
-    //     return ret({ action: null, reason: 'capital limit exceeded', nextTurn });
-    //   }
-
-    //   // ─── Хелпер: симуляция покупки ──────────────────────────────────────────────
-    //   const simulate = (side, price, size) => {
-    //     const dS_winner = side === 'winner' ? size : 0;
-    //     const dS_loser  = side === 'loser'  ? size : 0;
-    //     const new_S_winner = S_winner + dS_winner;
-    //     const new_S_loser  = S_loser  + dS_loser;
-    //     const fee = calcFee(price, size, takerFeeBps, feeExponent);
-    //     const new_I_total  = I_total  + price * size + fee; // I_total включает комиссию
-    //     const pw = new_S_winner - new_I_total;
-    //     const pl = new_S_loser  - new_I_total;
-    //     return {
-    //       S_winner:           r2(new_S_winner),
-    //       S_loser:            r2(new_S_loser),
-    //       I_total:            r2(new_I_total),
-    //       fee:                fee,
-    //       fee_perc:           `${(calcFee(price, size, takerFeeBps, feeExponent) / (price * size) * 100).toFixed(2)}%`,
-    //       Profit_winner:      r2(pw),
-    //       Profit_winner_perc: perc(pw, new_I_total),
-    //       Profit_loser:       r2(pl),
-    //       Profit_loser_perc:  perc(pl, new_I_total),
-    //       isRiskFree: pw > 0 && pl > 0,
+    //     const state = {
+    //       S_A, S_B, I_A, I_B,
+    //       I_total:       r2(I_total),
+    //       P_A, P_B,
+    //       Profit_A:      r2(Profit_A),
+    //       Profit_A_perc: perc(Profit_A, I_total),
+    //       Profit_B:      r2(Profit_B),
+    //       Profit_B_perc: perc(Profit_B, I_total),
+    //       isRiskFree,
+    //       budgetLeft:    r2(budgetLeft),
+    //       nextTurn,
     //     };
-    //   };
+    //     const ret = (extra) => ({ ...state, ...extra });
 
-    //   // ─── Хелпер: сколько shares winner нужно купить для risk-free ───────────────
-    //   // Условие: S_winner + dQ - (I_total + P*dQ) > 0 И S_loser - (I_total + P*dQ) > 0
-    //   // Из второго (более жёсткого): S_loser > I_total + P*dQ → dQ < (S_loser - I_total) / P
-    //   // Из первого: dQ > (I_total - S_winner) / (1 - P)
-    //   const calcRiskFreeSize = (price) => {
-    //     // Нужно: new_S_winner > new_I_total и new_S_loser > new_I_total
-    //     // new_S_loser = S_loser (не меняется при покупке winner)
-    //     // new_I_total = I_total + price * dQ
-    //     // Ограничение от лузера: S_loser > I_total + price*dQ → dQ < (S_loser - I_total) / price
-    //     const maxFromLoser = (S_loser - I_total) / price;
-    //     if (maxFromLoser <= 0) return null; // лузер слишком далеко от покрытия
+    //     // ─── Симуляция покупки ───────────────────────────────────────────────────────
+    //     const simulate = (assetId, price, size) => {
+    //       const new_S_A = S_A + (assetId === entry.assetId ? size : 0);
+    //       const new_S_B = S_B + (assetId === hedge.assetId ? size : 0);
+    //       const new_I   = I_total + price * size;
+    //       const pa = new_S_A - new_I;
+    //       const pb = new_S_B - new_I;
+    //       return {
+    //         S_A: r2(new_S_A), S_B: r2(new_S_B), I_total: r2(new_I),
+    //         Profit_A: r2(pa), Profit_B: r2(pb),
+    //         isRiskFree: pa > 0 && pb > 0,
+    //       };
+    //     };
 
-    //     // Нужно от winner: S_winner + dQ > I_total + price*dQ → dQ(1-price) > I_total - S_winner
-    //     const neededForWinner = (I_total - S_winner) / (1 - price);
-    //     if (neededForWinner < 0) {
-    //       // winner уже покрывает — нужен минимальный размер чтобы loser тоже покрыл
-    //       return null; // не должно быть — если winner покрывает но loser нет, то isRiskFree=false
+    //     // ─── Расчёт размера для RF ───────────────────────────────────────────────────
+    //     // Покупаем x shares по price. После:
+    //     //   profit_self  = profit_self_cur  + x*(1 - price)
+    //     //   profit_other = profit_other_cur - x*price
+    //     //   new_I        = I_total + x*price
+    //     // Условия RF+profitTarget:
+    //     //   profit_other_cur - x*price >= (I_total + x*price) * profitTarget
+    //     //   → x_max = (profit_other_cur - I_total*profitTarget) / (price*(1+profitTarget))
+    //     //   profit_self_cur + x*(1-price) >= (I_total + x*price) * profitTarget
+    //     //   → x_min = (I_total*profitTarget - profit_self_cur) / (1 - price*(1+profitTarget))
+    //     const calcRFSize = (assetId, price, profit_self, profit_other) => {
+    //       if (price >= 0.98) return null;
+
+    //       const x_max_raw = (profit_other - I_total * profitTarget) / (price * (1 + profitTarget));
+    //       if (x_max_raw <= 0) return null;
+    //       const x_max = Math.floor(x_max_raw * 100) / 100;
+
+    //       let x_min = 0;
+    //       if (profit_self < I_total * profitTarget) {
+    //         const denom = 1 - price * (1 + profitTarget);
+    //         if (denom <= 0) return null;
+    //         x_min = Math.ceil(((I_total * profitTarget - profit_self) / denom) * 100) / 100;
+    //       }
+
+    //       if (x_min > x_max) return null;
+
+    //       const size = Math.max(x_min, minSize(price));
+    //       if (size > x_max) return null;
+    //       if (size * price > budgetLeft) return null;
+
+    //       const sim = simulate(assetId, price, size);
+    //       if (!sim.isRiskFree) return null;
+
+    //       return size;
+    //     };
+
+    //     // ─── Сетка уровней -10% от стартовой цены ────────────────────────────────────
+    //     const buildGrid = (startPrice) => {
+    //       const levels = [];
+    //       for (let i = 1; i <= 9; i++) {
+    //         const p = Math.round(startPrice * (1 - 0.10 * i) * 100) / 100;
+    //         if (p < 0.01) break;
+    //         levels.push({ price: p, triggered: false });
+    //       }
+    //       return levels;
+    //     };
+
+    //     // ─── Стороны ─────────────────────────────────────────────────────────────────
+    //     const sideA = { assetId: entry.assetId, name: entry.name, price: P_A, profit: Profit_A, pos: entryPos };
+    //     const sideB = { assetId: hedge.assetId, name: hedge.name, price: P_B, profit: Profit_B, pos: hedgePos };
+    //     const loser  = Profit_A <= Profit_B ? sideA : sideB;
+    //     const winner = Profit_A <= Profit_B ? sideB : sideA;
+
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     // P0. RF уже достигнут
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     if (isRiskFree) {
+    //       log(`🏆 RF! A:${r2(Profit_A)}(${perc(Profit_A,I_total)}) B:${r2(Profit_B)}(${perc(Profit_B,I_total)})`);
+    //       return ret({ action: null, reason: 'risk-free locked' });
     //     }
 
-    //     // dQ должен быть в диапазоне [neededForWinner, maxFromLoser]
-    //     if (neededForWinner >= maxFromLoser) return null; // невозможно одной покупкой
+    //     // Бюджет исчерпан
+    //     if (budgetLeft < 1) {
+    //       log(`💸 Бюджет исчерпан ($${r2(I_total)}/$${maxBudget}). Ждём GTC.`);
+    //       return ret({ action: null, reason: 'budget exhausted, waiting GTC' });
+    //     }
 
-    //     // Берём чуть больше минимума с запасом profitTarget
-    //     const dQ = neededForWinner / (1 - price * (1 + profitTarget));
-    //     if (dQ <= 0 || dQ > maxFromLoser) return null;
-    //     return Math.ceil(dQ * 100) / 100; // округляем вверх
-    //   };
-
-    //   // ─── P1. Быстрый risk-free: можно одной покупкой winner? ───────────────────
-    //   // Проверяем если P_winner < 0.95 (есть смысл покупать) и loser уже близко к покрытию
-    //   if (P_winner < 0.95 && S_loser > I_total * 0.85) {
-    //     const rfSize = calcRiskFreeSize(P_winner);
-    //     if (rfSize !== null) {
-    //       const sim = simulate('winner', P_winner, rfSize);
-    //       if (sim.isRiskFree) {
-    //         log(`🚀 [P1] Risk-free одной покупкой! winner x${rfSize} @ ${P_winner}`);
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     // P1. RF по текущей цене — FOK прямо сейчас
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     for (const side of [sideA, sideB]) {
+    //       const other  = side === sideA ? sideB : sideA;
+    //       const rfSize = calcRFSize(side.assetId, side.price, side.profit, other.profit);
+    //       if (rfSize !== null) {
+    //         const sim = simulate(side.assetId, side.price, rfSize);
+    //         log(`🎯 P1 RF: ${side.name} x${rfSize} @ ${side.price} → A:${sim.Profit_A} B:${sim.Profit_B}`);
     //         return ret({
     //           action: {
-    //             type: 'buy',
-    //             assetId: winnerAsset.assetId,
-    //             name:    winnerAsset.name,
-    //             size:    rfSize,
-    //             price:   P_winner,
-    //             side:    'winner',
-    //           order_type: 'FOK',  // Fill Or Kill — мгновенно или отмена
-    //             reason:  'risk-free sprint: one buy to lock profit',
-    //             nextTurn: 'loser',
+    //             type:       'buy',
+    //             assetId:    side.assetId,
+    //             name:       side.name,
+    //             size:       rfSize,
+    //             amount:     r2(rfSize * side.price),
+    //             price:      side.price,
+    //             order_type: 'FOK',
+    //             reason:     `P1 RF via ${side.name} @ ${side.price}`,
     //             sim,
     //           }
     //         });
     //       }
     //     }
-    //   }
 
-    //   // ─── P2. Победитель убыточен → ONE SHOT до безубытка ──────────────────────
-    //   //
-    //   // Логика: если Profit_winner < 0, считаем ТОЧНОЕ количество shares чтобы
-    //   // выйти в безубыток по winner одной покупкой, и покупаем всё сразу.
-    //   //
-    //   // Формула безубытка:
-    //   //   new_S_winner = S_winner + dQ
-    //   //   new_I_total  = I_total + P_winner * dQ
-    //   //   Условие: new_S_winner >= new_I_total * (1 + profitTarget)
-    //   //   S_winner + dQ >= (I_total + P*dQ) * (1 + pt)
-    //   //   dQ * (1 - P*(1+pt)) >= I_total*(1+pt) - S_winner
-    //   //   dQ >= (I_total*(1+pt) - S_winner) / (1 - P*(1+pt))
-    //   //
-    //   // После этой покупки Profit_winner >= 0 и P2 больше не срабатывает.
-    //   // Лимит срабатываний не нужен — математика сама останавливает P2.
-    //   //
-    //   // Исключение: если P_winner >= 0.90 — слишком дорого для большой покупки,
-    //   // переходим к P3/P4 и ждём разворота через P1b.
-    //   const Profit_winner = S_winner - I_total;
-    //   if (Profit_winner < 0 && P_winner < 0.90) {
-    //     const denominator = 1 - P_winner * (1 + profitTarget);
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     // P2. GTC по текущей цене проигрывающей стороны
+    //     //     Если уже есть активный GTC — пропускаем P2 и P3
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     // const hasActiveGTC = loser.pos.activeGTC === true;
 
-    //     let dQ_ideal;
-    //     if (denominator <= 0) {
-    //       dQ_ideal = 1;
-    //     } else {
-    //       // Точный размер для выхода в безубыток + profitTarget буфер
-    //       dQ_ideal = (I_total * (1 + profitTarget) - S_winner) / denominator;
+    //     if (!hasActiveGTC && loser.price < 0.98) {
+    //       const gtcSize = calcRFSize(loser.assetId, loser.price, loser.profit, winner.profit);
+
+    //       if (gtcSize !== null) {
+    //         const sim = simulate(loser.assetId, loser.price, gtcSize);
+    //         // Помечаем что GTC выставлен — снять флаг нужно снаружи когда ордер исполнится/отменится
+    //         // loser.pos.activeGTC = true;
+    //         // loser.pos.activeGTCPrice = loser.price;
+    //         log(`📋 P2 GTC: ${loser.name} x${gtcSize} @ ${loser.price} → A:${sim.Profit_A} B:${sim.Profit_B}`);
+    //         return ret({
+    //           action: {
+    //             type:       'buy',
+    //             assetId:    loser.assetId,
+    //             name:       loser.name,
+    //             size:       gtcSize,
+    //             amount:     r2(gtcSize * loser.price),
+    //             price:      loser.price,
+    //             order_type: 'GTC',
+    //             reason:     `P2 GTC: ${loser.name} @ ${loser.price}`,
+    //             sim,
+    //           }
+    //         });
+    //       }
+    //       log(`⏳ P2 RF недостижим через ${loser.name} @ ${loser.price}`);
     //     }
 
-    //     // Информируем улучшает ли покупка pairCost (P2 выполняется в любом случае — математическая необходимость)
-    //     checkPairCostImprovement('winner', P_winner, Math.max(Math.ceil(dQ_ideal * 100)/100, 0.01), 'P2');
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     // P3. Grid averaging — только если нет активного GTC
+    //     //     Сетка -10% от стартовой цены проигрывающей стороны
+    //     //     $1 на каждом уровне
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     if (!hasActiveGTC) {
+    //       // Инициализация сетки
+    //       if (!loser.pos.gridStartPrice) {
+    //         loser.pos.gridStartPrice = loser.price;
+    //         loser.pos.gridLevels = buildGrid(loser.price);
+    //         log(`🗂 P3 Grid init: ${loser.name} start @ ${loser.price}, уровни: ${loser.pos.gridLevels.map(l => l.price).join(', ')}`);
+    //       }
 
-    //     // ── Кэп: защищаем P1b от уничтожения — только если P1b ещё возможен ────────
-    //     // P1b возможен только если S_loser > I_total (лузер может покрыть расходы).
-    //     // Если S_loser уже < I_total — P1b невозможен в любом случае, кэп не применяем.
-    //     // Если P1b ещё возможен — ограничиваем покупку чтобы не убить эту возможность:
-    //     //   new_I_total = I_total + P_winner*dQ <= S_loser * 0.95
-    //     //   dQ <= (S_loser * 0.95 - I_total) / P_winner
-    //     let dQ;
-    //     if (S_loser > I_total) {
-    //       // P1b ещё возможен — применяем кэп
-    //       const dQ_p1b_cap = (S_loser * 0.95 - I_total) / P_winner;
-    //       if (dQ_p1b_cap > 0.5) {
-    //         dQ = Math.min(dQ_ideal, dQ_p1b_cap);
-    //         if (dQ < dQ_ideal - 0.01) {
-    //           log(`🛡️ [P2] Кэп P1b: идеально x${dQ_ideal.toFixed(2)} → ограничено x${dQ.toFixed(2)} (S_loser=${S_loser.toFixed(2)} сохранён)`);
+    //       // Следующий нетронутый уровень который уже достигнут
+    //       const nextLevel = loser.pos.gridLevels.find(l => !l.triggered && loser.price <= l.price);
+
+    //       if (nextLevel && loser.price < 0.98) {
+    //         const buySize = r2(Math.ceil((1.0 / loser.price) * 100) / 100); // ~$1
+    //         const cost    = r2(buySize * loser.price);
+
+    //         if (cost <= budgetLeft) {
+    //           nextLevel.triggered = true;
+    //           const sim = simulate(loser.assetId, loser.price, buySize);
+    //           log(`📉 P3 Grid: ${loser.name} x${buySize} @ ${loser.price} (уровень ${nextLevel.price}, $${cost}) осталось: $${r2(budgetLeft - cost)}`);
+    //           return ret({
+    //             action: {
+    //               type:       'buy',
+    //               assetId:    loser.assetId,
+    //               name:       loser.name,
+    //               size:       buySize,
+    //               amount:     cost,
+    //               price:      loser.price,
+    //               order_type: 'FOK',
+    //               reason:     `P3 grid ${nextLevel.price}: ${loser.name} @ ${loser.price}`,
+    //               sim,
+    //             }
+    //           });
     //         }
-    //       } else {
-    //         // Кэп слишком мал — P1b почти недостижим, покупаем идеально
-    //         dQ = dQ_ideal;
     //       }
     //     } else {
-    //       // S_loser < I_total — P1b уже невозможен, покупаем сколько нужно для breakeven
-    //       dQ = dQ_ideal;
-    //     }
-    //     const buySize = Math.ceil(dQ * 100) / 100;
-
-    //     const sim = simulate('winner', P_winner, buySize);
-    //     const capped = dQ < dQ_ideal - 0.01;
-
-    //     if (sim.Profit_winner >= 0) {
-    //       log(`⚡ [P2] ONE SHOT: ${winnerAsset.name} x${buySize} @ ${P_winner} → Profit_winner: +${sim.Profit_winner.toFixed(3)}${capped ? ' [capped для P1b]' : ''}`);
-    //     } else {
-    //       // Куплено меньше чем нужно для полного безубытка (из-за кэпа) — но всё равно покупаем
-    //       log(`⚡ [P2] PARTIAL: ${winnerAsset.name} x${buySize} @ ${P_winner} → Profit_winner: ${sim.Profit_winner.toFixed(3)} [P1b cap]`);
+    //       // log(`⏸ P3 Grid пропущен — есть активный GTC @ ${loser.pos.activeGTCPrice}`);
+    //       log(`⏸ P3 Grid пропущен — есть активный GTC`);
     //     }
 
-    //     if (buySize > 0) {
-    //       return ret({
-    //         action: {
-    //           type:    'buy',
-    //           assetId: winnerAsset.assetId,
-    //           name:    winnerAsset.name,
-    //           size:    buySize,
-    //           price:   P_winner,
-    //           side:    'winner',
-    //           order_type: 'FOK',  // Fill Or Kill — мгновенно или отмена
-    //           reason:  `P2 ${capped ? 'partial' : 'one-shot'}: ${Profit_winner.toFixed(3)} → ${sim.Profit_winner.toFixed(3)}${capped ? ' (P1b preserved)' : ''}`,
-    //           nextTurn: 'loser',
-    //           sim,
-    //         }
-    //       });
-    //     }
-    //     log(`⚠️ [P2] buySize=0, передаём в P3/P4`);
-    //   }
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     // P4. Явный лидер >= 0.66 — докупаем до +5%
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     // const LEADER_THRESHOLD = 0.66;
+    //     // const leader = P_A >= LEADER_THRESHOLD ? sideA : P_B >= LEADER_THRESHOLD ? sideB : null;
 
-    //   // ─── P3/P4. Стандартное чередование ────────────────────────────────────────
-    //   let actionAsset, actionPrice, actionSide, actionReason;
-    //   let nextTurnAfter = nextTurn;
+    //     // // ← ДОБАВИТЬ СЮДА — блокировка по pairCost
+    //     // const avg_A = S_A > 0 ? I_A / S_A : 0;
+    //     // const avg_B = S_B > 0 ? I_B / S_B : 0;
+    //     // const pairCost = avg_A + avg_B;
+    //     // const MAX_PAIR_COST = 1.10;
 
-    //   if (nextTurn === 'winner') {
-    //     if (P_winner >= 0.98) {
-    //       // Winner заблокирован — экстренно покупаем лузера если дёшев
-    //       if (P_loser <= 0.20) {
-    //         actionAsset   = loserAsset;
-    //         actionPrice   = P_loser;
-    //         actionSide    = 'loser';
-    //         actionReason  = 'winner blocked, emergency loser buy';
-    //         nextTurnAfter = 'winner';
-    //       } else {
-    //         return ret({ action: null, reason: 'winner >= 0.98, loser not cheap', nextTurn });
-    //       }
-    //     } else {
-    //       // Стандартная докупка winner
-    //       const denominator = 1 - P_winner * (1 + profitTarget);
-    //       const needed = profitTarget * I_total - Profit_winner;
-    //       let dQ;
-    //       if (needed <= 0) {
-    //         dQ = 0.5 / P_winner; // профит уже выполнен — минимальная докупка
-    //       } else if (denominator <= 0) {
-    //         dQ = 0.5 / P_winner;
-    //       } else {
-    //         dQ = needed / denominator;
-    //       }
-    //       const maxBuy = Math.max(S_winner * 0.20, 1);
-    //       actionAsset   = winnerAsset;
-    //       actionPrice   = P_winner;
-    //       actionSide    = 'winner';
-    //       actionReason  = 'scheduled winner buy';
-    //       nextTurnAfter = 'loser';
-          
-    //       const buySize = Math.round(Math.min(dQ, maxBuy) * 100) / 100;
-    //       const sim = simulate('winner', P_winner, buySize);
-    //       checkPairCostImprovement('winner', P_winner, buySize, 'P3');
-    //       log(`🛒 [P3] WINNER: ${winnerAsset.name} x${buySize} @ ${P_winner}`);
-    //       return ret({
-    //         action: {
-    //           type: 'buy', assetId: winnerAsset.assetId, name: winnerAsset.name,
-    //           size: buySize, price: P_winner, side: 'winner',
-    //           order_type: 'FOK',
-    //           reason: actionReason, nextTurn: nextTurnAfter, sim,
-    //         }
-    //       });
-    //     }
+    //     // if (leader && pairCost > MAX_PAIR_COST) {
+    //     //   log(`⛔ P4 заблокирован — pairCost ${r2(pairCost)} > ${MAX_PAIR_COST}`);
+    //     //   // переходим к P5
+    //     //   log(`⏸ Ждём. A:${r2(Profit_A)}(${perc(Profit_A,I_total)}) B:${r2(Profit_B)}(${perc(Profit_B,I_total)}) budget:$${r2(budgetLeft)}`);
+    //     //   return ret({ action: null, reason: `P4 blocked pairCost ${r2(pairCost)}` });
+    //     // }
 
-    //   } else {
-    //     // nextTurn === 'loser'
-    //     if (P_loser >= 0.98) {
-    //       return ret({ action: null, reason: 'loser >= 0.98', nextTurn });
-    //     }
-    //     if (P_loser > 0.20) {
-    //       // Лузер не дешёвый — ЖДЁМ. Не делаем fallback на winner.
-    //       log(`⏳ [P4] Ждём лузера ≤ 0.20. P_loser=${P_loser.toFixed(3)}`);
-    //       return ret({ action: null, reason: `waiting loser <= 0.20, now: ${P_loser.toFixed(3)}`, nextTurn: 'loser' });
-    //     }
-    //     // Лузер дешёвый — покупаем страховку
-    //     actionAsset   = loserAsset;
-    //     actionPrice   = P_loser;
-    //     actionSide    = 'loser';
-    //     actionReason  = 'scheduled loser insurance buy';
-    //     nextTurnAfter = 'winner';
-    //   }
+    //     // if (leader && leader.price < 0.98) {
+    //     //   const targetProfit = I_total * ARBITRAGE_PROFIT_PERCENT;
 
-    //   // ─── Расчёт размера для лузера ──────────────────────────────────────────────
-    //   const budgetForLoser = Profit_winner - profitTarget * I_total;
-    //   let loserBuySize;
-    //   if (budgetForLoser > 0) {
-    //     loserBuySize = Math.round(Math.min(
-    //       budgetForLoser / (actionPrice * (1 + profitTarget)),
-    //       Math.max(S_winner * 0.30, 1)
-    //     ) * 100) / 100;
-    //   } else {
-    //     loserBuySize = Math.round(Math.min(0.30 / actionPrice, Math.max(S_winner * 0.30, 1)) * 100) / 100;
-    //   }
+    //     //   if (leader.profit < targetProfit) {
+    //     //     const needed  = (targetProfit - leader.profit) / (1 - leader.price);
+    //     //     let buySize = r2(Math.max(minSize(leader.price), Math.ceil(needed * 100) / 100));
+    //     //     let cost    = r2(buySize * leader.price);
 
-    //   if (loserBuySize <= 0) {
-    //     return ret({ action: null, reason: 'loser buySize = 0', nextTurn });
-    //   }
+    //     //     // if (cost > budgetLeft) {
+    //     //     //   buySize = Math.floor((budgetLeft / leader.price) * 100) / 100;
+    //     //     //   cost    = r2(buySize * leader.price);
+    //     //     // }
 
-    //   const sim = simulate(actionSide, actionPrice, loserBuySize);
-    //   checkPairCostImprovement('loser', actionPrice, loserBuySize, 'P4');
-    //   log(`🛒 [P4] LOSER: ${actionAsset.name} x${loserBuySize} @ ${actionPrice}`);
+    //     //     // if (cost < 1) return ret({ action: null, reason: 'P4 skip — affordable amount < $1' });
 
-    //   return ret({
-    //     action: {
-    //       type:       'buy',
-    //       assetId:    actionAsset.assetId,
-    //       name:       actionAsset.name,
-    //       size:       loserBuySize,
-    //       price:      actionPrice,
-    //       side:       actionSide,
-    //       order_type: 'FOK',
-    //       reason:     actionReason,
-    //       nextTurn:   nextTurnAfter,
-    //       sim,
-    //     }
-    //   });
+    //     //     // ПОСЛЕ:
+    //     //     const MAX_P4_SINGLE = 10.00;
+
+    //     //     // Лимит на одну покупку
+    //     //     if (cost > MAX_P4_SINGLE) {
+    //     //       buySize = Math.floor((MAX_P4_SINGLE / leader.price) * 100) / 100;
+    //     //       cost    = r2(buySize * leader.price);
+    //     //     }
+
+    //     //     // Если после лимита всё равно не влезает в бюджет
+    //     //     if (cost > budgetLeft) {
+    //     //       buySize = Math.floor((budgetLeft / leader.price) * 100) / 100;
+    //     //       cost    = r2(buySize * leader.price);
+    //     //     }
+
+    //     //     if (cost < 1) return ret({ action: null, reason: 'P4 skip — affordable amount < $1' });
+
+
+    //     //     // if (cost <= budgetLeft) {
+    //     //       const sim = simulate(leader.assetId, leader.price, buySize);
+    //     //       log(`📈 P4 Лидер ${leader.name} @ ${leader.price}, x${buySize} до +5%`);
+    //     //       return ret({
+    //     //         action: {
+    //     //           type:       'buy',
+    //     //           assetId:    leader.assetId,
+    //     //           name:       leader.name,
+    //     //           size:       buySize,
+    //     //           amount:     cost,
+    //     //           price:      leader.price,
+    //     //           order_type: 'FOK',
+    //     //           reason:     `P4 leader ${leader.name} @ ${leader.price}`,
+    //     //           sim,
+    //     //         }
+    //     //       });
+    //     //     // }
+    //     //   }
+    //     // }
+
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     // P5. Ждём
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     log(`⏸ Ждём. A:${r2(Profit_A)}(${perc(Profit_A,I_total)}) B:${r2(Profit_B)}(${perc(Profit_B,I_total)}) budget:$${r2(budgetLeft)}`);
+    //     return ret({ action: null, reason: `waiting. P_A:${P_A} P_B:${P_B}` });
+    //   } catch (err) {
+    //     const errMsg = `❌ recalculate error: ${err.message}`;
+    //     log(errMsg);
+    //     console.error(`[recalculate]`, err);
+    //     return { error: err.message };
+    //   }        
     // }
-
-      // рабочий, но возникли проблемы с FOK и min 1$. Наверное пойдет для больших сделок.
-    /**
-     * recalculate — Gabagool-style binary market hedging strategy
-     *
-     * ЛОГИКА ПРИОРИТЕТОВ (в порядке убывания):
-     *
-     *  P0.  Risk-free уже достигнут → стоп
-     *  P1b. Лузер дешёвый (≤ 0.48) → проверяем RF через усреднение лузера
-     *  P1a. Winner дешёвый (< 0.48) → проверяем RF через winner
-     *  P2.  Profit_winner < 0 → ONE SHOT до безубытка (с кэпом P1b). Всегда.
-     *  P3.  nextTurn='winner' → докупаем winner ТОЛЬКО если улучшает pairCost
-     *  P4.  nextTurn='loser'  → динамический порог min(avg_loser*0.60, 0.35)
-     *
-     * ИЗМЕНЕНИЯ v4:
-     *  - P3 БЛОКИРУЮЩИЙ: цена winner (с fee) ≥ avg_winner → пропуск, ждём
-     *  - P4 динамический порог: min(avg_loser*0.60, 0.35) вместо фиксированных 0.20
-     *  - calcFee упрощён (убраны лишние параметры)
-     *  - avg_winner/avg_loser вычисляются явно
-     *  - accumulatedFees добавляется в I_total
-     *
-     * @param {object}  params
-     * @param {Array}   params.positions              — [{ asset, size, initialValue }]
-     * @param {object}  params.entry                  — { assetId, name }
-     * @param {object}  params.hedge                  — { assetId, name }
-     * @param {object}  params.opp                    — { id, outcomes, rawEndDate }
-     * @param {string}  params.nextTurn               — 'winner' | 'loser'
-     * @param {number}  [params.profitTarget=0.05]    — мин. профит (доля от I_total)
-     * @param {number}  [params.initialCapital]       — I_A+I_B при первом запуске
-     * @param {number}  [params.maxCapitalMultiplier=3]
-     * @param {number}  [params.takerFeeBps=2500]     — crypto=2500 (feeRate=0.25)
-     * @param {number}  [params.feeExponent=2]        — crypto=2, sports=1
-     * @param {boolean} [params.feesEnabled=false]    — из маркета: feesEnabled
-     * @param {number}  [params.accumulatedFees=0]    — накопленные fee (копится в autoBidBot)
-     * @param {Function}[params.pushMarketLog]
-     * @param {Function}[params.onSignal]
-     */
+  // последняя от claude
     // function recalculate({
     //   positions,
     //   entry,
     //   hedge,
+    //   hasActiveGTC = false,
+    //   gridState = {},        // ← добавлен параметр
     //   opp,
-    //   nextTurn = 'winner',
-    //   profitTarget = 0.05,
-    //   maxCapitalMultiplier = 3,
-    //   initialCapital,
-    //   takerFeeBps = 2500,
-    //   feeExponent = 2,
-    //   feesEnabled = false,
-    //   accumulatedFees = 0,
+    //   nextTurn = 'loser',
+    //   profitTarget = PROFIT_PERCENT,
+    //   maxBudget = 100,
     //   pushMarketLog,
     //   onSignal,
     // } = {}) {
-
-    //   const log  = (text) => { pushMarketLog?.(opp.id, text); onSignal?.({ type: 'bidding', opp, text }); };
-    //   const r2   = (n) => Math.round(n * 100) / 100;
-    //   const perc = (profit, total) => `${((profit / total) * 100).toFixed(1)}%`;
-
-    //   // ─── Комиссия ───────────────────────────────────────────────────────────────
-    //   // Официальная формула Polymarket (docs.polymarket.com/fees):
-    //   //   fee = C × p × feeRate × (p × (1-p))^exponent
-    //   // Crypto: feeRate=0.25, exponent=2 → макс 1.56% при p=0.50
-    //   const calcFee = (price, size) => {
-    //     if (!feesEnabled) return 0;
-    //     const feeRate = takerFeeBps / 10000;
-    //     return Math.round(size * price * feeRate * Math.pow(price * (1 - price), feeExponent) * 10000) / 10000;
-    //   };
-
-    //   // ─── 1. Валидация ───────────────────────────────────────────────────────────
-    //   const entryPos = positions.find(p => p.asset === entry.assetId);
-    //   const hedgePos = positions.find(p => p.asset === hedge.assetId);
-    //   if (!entryPos || !hedgePos) { log(`❌ позиции не найдены`); return null; }
-
-    //   const S_A = Number(entryPos.size);
-    //   const S_B = Number(hedgePos.size);
-    //   const I_A = Number(entryPos.initialValue);
-    //   const I_B = Number(hedgePos.initialValue);
-    //   // I_total включает накопленные комиссии (API не включает fee)
-    //   const I_total  = I_A + I_B + accumulatedFees;
-    //   const avg_A    = S_A > 0 ? I_A / S_A : 0;
-    //   const avg_B    = S_B > 0 ? I_B / S_B : 0;
-    //   const pairCost = avg_A + avg_B;
-
-    //   // ─── 2. Текущие цены ────────────────────────────────────────────────────────
-    //   const P_A = Number(opp.outcomes.find(o => o.assetId === entry.assetId)?.price ?? 0);
-    //   const P_B = Number(opp.outcomes.find(o => o.assetId === hedge.assetId)?.price ?? 0);
-    //   if (!P_A || !P_B) { log(`❌ цены не найдены`); return null; }
-
-    //   // ─── 3. Прибыль и состояние ─────────────────────────────────────────────────
-    //   const Profit_A          = S_A - I_total;
-    //   const Profit_B          = S_B - I_total;
-    //   const isRiskFree        = Profit_A > 0 && Profit_B > 0;
-    //   const riskFreeProximity = Math.min(Profit_A, Profit_B) / I_total;
-
-    //   // ─── 4. Победитель / лузер ──────────────────────────────────────────────────
-    //   const winnerAsset = P_A > 0.52 ? entry : (P_B > 0.52 ? hedge : null);
-    //   const loserAsset  = P_A > 0.52 ? hedge : (P_B > 0.52 ? entry : null);
-    //   const P_winner   = winnerAsset?.assetId === entry.assetId ? P_A : P_B;
-    //   const P_loser    = loserAsset?.assetId  === entry.assetId ? P_A : P_B;
-    //   const S_winner   = winnerAsset?.assetId === entry.assetId ? S_A : S_B;
-    //   const S_loser    = loserAsset?.assetId  === entry.assetId ? S_A : S_B;
-    //   const I_winner   = winnerAsset?.assetId === entry.assetId ? I_A : I_B;
-    //   const I_loser    = loserAsset?.assetId  === entry.assetId ? I_A : I_B;
-    //   const avg_winner = S_winner > 0 ? I_winner / S_winner : 0;
-    //   const avg_loser  = S_loser  > 0 ? I_loser  / S_loser  : 0;
-
-    //   // ─── Стейт для возвратов ────────────────────────────────────────────────────
-    //   const state = {
-    //     S_A, S_B, I_A, I_B,
-    //     I_total:            r2(I_total),
-    //     avg_A:              r2(avg_A),
-    //     avg_B:              r2(avg_B),
-    //     pairCost:           r2(pairCost),
-    //     P_A, P_B,
-    //     Profit_A:           r2(Profit_A),
-    //     Profit_A_perc:      perc(Profit_A, I_total),
-    //     Profit_B:           r2(Profit_B),
-    //     Profit_B_perc:      perc(Profit_B, I_total),
-    //     isRiskFree, riskFreeProximity,
-    //     nextTurn,
-    //   };
-    //   const ret = (extra) => ({ ...state, ...extra });
-
-    //   // ─── Хелпер: симуляция покупки ──────────────────────────────────────────────
-    //   const simulate = (side, price, size) => {
-    //     const new_S_winner = S_winner + (side === 'winner' ? size : 0);
-    //     const new_S_loser  = S_loser  + (side === 'loser'  ? size : 0);
-    //     const fee          = calcFee(price, size);
-    //     const new_I_total  = I_total + price * size + fee;
-    //     const pw = new_S_winner - new_I_total;
-    //     const pl = new_S_loser  - new_I_total;
-    //     return {
-    //       S_winner:           r2(new_S_winner),
-    //       S_loser:            r2(new_S_loser),
-    //       I_total:            r2(new_I_total),
-    //       fee,
-    //       fee_perc:           `${(price * size > 0 ? fee / (price * size) * 100 : 0).toFixed(2)}%`,
-    //       Profit_winner:      r2(pw),
-    //       Profit_winner_perc: perc(pw, new_I_total),
-    //       Profit_loser:       r2(pl),
-    //       Profit_loser_perc:  perc(pl, new_I_total),
-    //       isRiskFree:         pw > 0 && pl > 0,
+    
+    //   const log = (text) => { pushMarketLog?.(opp.id, text); onSignal?.({ type: 'bidding', opp, text }); };
+    
+    //   try {
+    //     const r2      = (n) => Math.round(n * 100) / 100;
+    //     const perc    = (profit, total) => `${((profit / total) * 100).toFixed(1)}%`;
+    //     const minSize = (price) => Math.ceil((1.0 / price) * 100) / 100;
+    
+    //     // ─── Валидация ───────────────────────────────────────────────────────────────
+    //     const entryPos = positions.find(p => p.asset === entry.assetId);
+    //     const hedgePos = positions.find(p => p.asset === hedge.assetId);
+    //     if (!entryPos || !hedgePos) { log(`❌ позиции не найдены`); return { error: 'позиции не найдены' }; }
+    
+    //     const S_A     = Number(entryPos.size);
+    //     const S_B     = Number(hedgePos.size);
+    //     const I_A     = Number(entryPos.initialValue);
+    //     const I_B     = Number(hedgePos.initialValue);
+    //     const I_total = I_A + I_B;
+    
+    //     const P_A = Number(opp.outcomes.find(o => o.assetId === entry.assetId)?.price ?? 0);
+    //     const P_B = Number(opp.outcomes.find(o => o.assetId === hedge.assetId)?.price ?? 0);
+    //     if (!P_A || !P_B) { log(`❌ цены не найдены`); return { error: 'цены не найдены' }; }
+    //     if (S_A <= 0 || S_B <= 0) { log(`❌ размеры позиций = 0`); return { error: 'размеры позиций = 0' }; }
+    
+    //     const budgetLeft = maxBudget - I_total;
+    
+    //     // ─── Текущее состояние ───────────────────────────────────────────────────────
+    //     const Profit_A   = S_A - I_total;
+    //     const Profit_B   = S_B - I_total;
+    //     const isRiskFree = Profit_A > 0 && Profit_B > 0;
+    
+    //     const state = {
+    //       S_A, S_B, I_A, I_B,
+    //       I_total:       r2(I_total),
+    //       P_A, P_B,
+    //       Profit_A:      r2(Profit_A),
+    //       Profit_A_perc: perc(Profit_A, I_total),
+    //       Profit_B:      r2(Profit_B),
+    //       Profit_B_perc: perc(Profit_B, I_total),
+    //       isRiskFree,
+    //       budgetLeft:    r2(budgetLeft),
+    //       nextTurn,
     //     };
-    //   };
-
-    //   // ─── Хелпер: улучшает ли покупка pairCost? ──────────────────────────────────
-    //   // Покупка улучшает avg_side если realCostPerShare < текущий avg_side
-    //   // realCostPerShare = (price * size + fee) / size
-    //   const checkPairCost = (side, price, size, label) => {
-    //     const fee              = calcFee(price, size);
-    //     const realCostPerShare = (price * size + fee) / size;
-    //     const avg_side         = side === 'winner' ? avg_winner : avg_loser;
-    //     const improves         = avg_side > 0 ? realCostPerShare < avg_side : true;
-    //     const feePerc          = price * size > 0 ? (fee / (price * size) * 100).toFixed(1) : '0';
-    //     if (!improves) {
-    //       log(`💸 [${label}] pairCost НЕ улучшится: ${realCostPerShare.toFixed(3)} ≥ avg_${side} ${avg_side.toFixed(3)} (fee=${feePerc}%)`);
-    //     } else {
-    //       log(`✅ [${label}] pairCost улучшится: ${realCostPerShare.toFixed(3)} < avg_${side} ${avg_side.toFixed(3)} (fee=${feePerc}%)`);
+    
+    //     // ← gridState всегда возвращается в ret
+    //     const ret = (extra) => ({ ...state, gridState, ...extra });
+    
+    //     // ─── Симуляция покупки ───────────────────────────────────────────────────────
+    //     const simulate = (assetId, price, size) => {
+    //       const new_S_A = S_A + (assetId === entry.assetId ? size : 0);
+    //       const new_S_B = S_B + (assetId === hedge.assetId ? size : 0);
+    //       const new_I   = I_total + price * size;
+    //       const pa = new_S_A - new_I;
+    //       const pb = new_S_B - new_I;
+    //       return {
+    //         S_A: r2(new_S_A), S_B: r2(new_S_B), I_total: r2(new_I),
+    //         Profit_A: r2(pa), Profit_B: r2(pb),
+    //         isRiskFree: pa > 0 && pb > 0,
+    //       };
+    //     };
+    
+    //     // ─── Расчёт размера для RF ───────────────────────────────────────────────────
+    //     const calcRFSize = (assetId, price, profit_self, profit_other) => {
+    //       if (price >= 0.98) return null;
+    
+    //       const x_max_raw = (profit_other - I_total * profitTarget) / (price * (1 + profitTarget));
+    //       if (x_max_raw <= 0) return null;
+    //       const x_max = Math.floor(x_max_raw * 100) / 100;
+    
+    //       let x_min = 0;
+    //       if (profit_self < I_total * profitTarget) {
+    //         const denom = 1 - price * (1 + profitTarget);
+    //         if (denom <= 0) return null;
+    //         x_min = Math.ceil(((I_total * profitTarget - profit_self) / denom) * 100) / 100;
+    //       }
+    
+    //       if (x_min > x_max) return null;
+    
+    //       const size = Math.max(x_min, minSize(price));
+    //       if (size > x_max) return null;
+    //       if (size * price > budgetLeft) return null;
+    
+    //       const sim = simulate(assetId, price, size);
+    //       if (!sim.isRiskFree) return null;
+    
+    //       return size;
+    //     };
+    
+    //     // ─── Сетка уровней -10% от стартовой цены ────────────────────────────────────
+    //     const buildGrid = (startPrice) => {
+    //       const levels = [];
+    //       for (let i = 1; i <= 9; i++) {
+    //         const p = Math.round(startPrice * (1 - 0.10 * i) * 100) / 100;
+    //         if (p < 0.01) break;
+    //         levels.push({ price: p, triggered: false });
+    //       }
+    //       return levels;
+    //     };
+    
+    //     // ─── Стороны ─────────────────────────────────────────────────────────────────
+    //     const sideA = { assetId: entry.assetId, name: entry.name, price: P_A, profit: Profit_A };
+    //     const sideB = { assetId: hedge.assetId, name: hedge.name, price: P_B, profit: Profit_B };
+    //     const loser  = Profit_A <= Profit_B ? sideA : sideB;
+    //     const winner = Profit_A <= Profit_B ? sideB : sideA;
+    
+    //     // ← ключ лузера для gridState
+    //     const loserKey = Profit_A <= Profit_B ? 'entry' : 'hedge';
+    //     if (!gridState[loserKey]) gridState[loserKey] = {};
+    //     const loserGrid = gridState[loserKey];
+    
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     // P0. RF уже достигнут
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     if (isRiskFree) {
+    //       log(`🏆 RF! A:${r2(Profit_A)}(${perc(Profit_A,I_total)}) B:${r2(Profit_B)}(${perc(Profit_B,I_total)})`);
+    //       return ret({ action: null, reason: 'risk-free locked' });
     //     }
-    //     return { improves, realCostPerShare, avg_side };
-    //   };
-
-    //   // ════════════════════════════════════════════════════════════════════════════
-    //   // P0. Risk-free достигнут
-    //   // ════════════════════════════════════════════════════════════════════════════
-    //   if (isRiskFree) {
-    //     log(`🏆 Risk-free! Profit_A=${Profit_A.toFixed(3)} Profit_B=${Profit_B.toFixed(3)}`);
-    //     return ret({ action: null, reason: 'risk-free locked' });
-    //   }
-
-    //   // ════════════════════════════════════════════════════════════════════════════
-    //   // P1b. RF через усреднение ЛУЗЕРА
-    //   //
-    //   // Если лузер упал ≤ 0.48 — пробуем достичь RF одной покупкой лузера.
-    //   //   dQ_min = (I_total - S_loser) / (1 - P_loser)  — мин чтобы лузер покрыл I_total
-    //   //   dQ_max = (S_winner - I_total) / P_loser        — макс чтобы winner покрыл I_total
-    //   // Если [dQ_min, dQ_max] непустой → RF достижим.
-    //   // ════════════════════════════════════════════════════════════════════════════
-    //   if (winnerAsset && loserAsset && P_loser <= 0.48 && P_loser < 0.98) {
-    //     const dQ_min = (I_total - S_loser) / (1 - P_loser);
-    //     const dQ_max = (S_winner - I_total) / P_loser;
-
-    //     if (dQ_max > 0 && (dQ_min <= 0 || dQ_min < dQ_max)) {
-    //       const raw_dQ      = Math.max(dQ_min, 0);
-    //       const buffered_dQ = raw_dQ / (1 - P_loser * (1 + profitTarget));
-    //       const dQ          = Math.min(buffered_dQ > 0 ? buffered_dQ : raw_dQ + 0.5, dQ_max);
-    //       const buySize     = Math.ceil(Math.max(dQ, 0.01) * 100) / 100;
-
-    //       const sim_S_loser = S_loser + buySize;
-    //       const sim_fee     = calcFee(P_loser, buySize);
-    //       const sim_I_total = I_total + P_loser * buySize + sim_fee;
-    //       const sim_pw      = S_winner    - sim_I_total;
-    //       const sim_pl      = sim_S_loser - sim_I_total;
-    //       const sim_isRF    = sim_pw > 0 && sim_pl > 0;
-
-    //       if (sim_isRF) {
-    //         const loserName    = loserAsset.assetId === entry.assetId ? entry.name : hedge.name;
-    //         const loserAssetId = loserAsset.assetId;
-    //         const newAvgLoser  = (I_loser + P_loser * buySize) / sim_S_loser;
-    //         log(`🎯 [P1b] RF через лузера! ${loserName} x${buySize} @ ${P_loser} fee:${sim_fee.toFixed(4)} (avg: ${avg_loser.toFixed(3)} → ${newAvgLoser.toFixed(3)})`);
+    
+    //     // Бюджет исчерпан
+    //     if (budgetLeft < 1) {
+    //       log(`💸 Бюджет исчерпан ($${r2(I_total)}/$${maxBudget}). Ждём GTC.`);
+    //       return ret({ action: null, reason: 'budget exhausted, waiting GTC' });
+    //     }
+    
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     // P1. RF по текущей цене — FOK прямо сейчас
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     for (const side of [sideA, sideB]) {
+    //       const other  = side === sideA ? sideB : sideA;
+    //       const rfSize = calcRFSize(side.assetId, side.price, side.profit, other.profit);
+    //       if (rfSize !== null) {
+    //         const sim = simulate(side.assetId, side.price, rfSize);
+    //         log(`🎯 P1 RF: ${side.name} x${rfSize} @ ${side.price} → A:${sim.Profit_A} B:${sim.Profit_B}`);
     //         return ret({
     //           action: {
     //             type:       'buy',
-    //             assetId:    loserAssetId,
-    //             name:       loserName,
-    //             size:       buySize,
-    //             amount:     r2(buySize * P_loser),
-    //             price:      P_loser,
-    //             side:       'risk_free_shot',
+    //             assetId:    side.assetId,
+    //             name:       side.name,
+    //             size:       rfSize,
+    //             amount:     r2(rfSize * side.price),
+    //             price:      side.price,
     //             order_type: 'FOK',
-    //             reason:     `loser dropped to ${P_loser}, direct risk-free via averaging`,
-    //             nextTurn,
-    //             sim: {
-    //               I_total:            r2(sim_I_total),
-    //               fee:                sim_fee,
-    //               fee_perc:           `${(sim_fee / (P_loser * buySize) * 100).toFixed(2)}%`,
-    //               Profit_winner:      r2(sim_pw),
-    //               Profit_winner_perc: perc(sim_pw, sim_I_total),
-    //               Profit_loser:       r2(sim_pl),
-    //               Profit_loser_perc:  perc(sim_pl, sim_I_total),
-    //               isRiskFree:         sim_isRF,
-    //             },
+    //             reason:     `P1 RF via ${side.name} @ ${side.price}`,
+    //             sim,
     //           }
     //         });
     //       }
     //     }
-    //   }
-
-    //   // ─── Нет чёткого победителя ─────────────────────────────────────────────────
-    //   if (!winnerAsset || !loserAsset) {
-    //     log(`⏸ Нет чёткого победителя. P_A=${P_A} P_B=${P_B}`);
-    //     return ret({ action: null, reason: 'no clear winner', nextTurn });
-    //   }
-
-    //   // ─── Лимит капитала ─────────────────────────────────────────────────────────
-    //   const baseCapital  = initialCapital ?? I_total;
-    //   const capitalLimit = baseCapital * maxCapitalMultiplier;
-    //   const isNearRF     = riskFreeProximity > -0.05;
-    //   if (I_total >= capitalLimit && !isNearRF) {
-    //     log(`🛑 Лимит капитала. I_total=${I_total.toFixed(2)} лимит=${capitalLimit.toFixed(2)}`);
-    //     return ret({ action: null, reason: 'capital limit exceeded', nextTurn });
-    //   }
-
-    //   // ════════════════════════════════════════════════════════════════════════════
-    //   // P1a. RF через докупку WINNER (если winner дёшев < 0.48)
-    //   //
-    //   // Winner подешевел — докупаем его до RF.
-    //   //   maxFromLoser    = (S_loser - I_total) / P_winner  — макс чтобы лузер покрыл
-    //   //   neededForWinner = (I_total - S_winner) / (1-P_winner) — мин чтобы winner покрыл
-    //   // ════════════════════════════════════════════════════════════════════════════
-    //   if (P_winner < 0.48) {
-    //     const maxFromLoser = (S_loser - I_total) / P_winner;
-    //     if (maxFromLoser > 0) {
-    //       const neededForWinner = (I_total - S_winner) / (1 - P_winner);
-    //       if (neededForWinner < maxFromLoser) {
-    //         const raw_dQ  = Math.max(neededForWinner, 0);
-    //         const dQ      = raw_dQ / (1 - P_winner * (1 + profitTarget));
-    //         const buySize = Math.ceil(Math.max(dQ > 0 ? dQ : raw_dQ + 0.5, 0.01) * 100) / 100;
-    //         if (buySize < maxFromLoser) {
-    //           const sim = simulate('winner', P_winner, buySize);
-    //           if (sim.isRiskFree) {
-    //             log(`🎯 [P1a] RF через winner! ${winnerAsset.name} x${buySize} @ ${P_winner}`);
-    //             return ret({
-    //               action: {
-    //                 type:       'buy',
-    //                 assetId:    winnerAsset.assetId,
-    //                 name:       winnerAsset.name,
-    //                 size:       buySize,
-    //                 amount:     r2(buySize * P_winner),
-    //                 price:      P_winner,
-    //                 side:       'winner',
-    //                 order_type: 'FOK',
-    //                 reason:     `winner cheap at ${P_winner}, direct risk-free`,
-    //                 nextTurn:   'loser',
-    //                 sim,
-    //               }
-    //             });
-    //           }
-    //         }
-    //       }
-    //     }
-    //   }
-
-    //   // ════════════════════════════════════════════════════════════════════════════
-    //   // P2. Profit_winner < 0 → ONE SHOT до безубытка
-    //   //
-    //   // Winner убыточен — покупаем сколько нужно для выхода в ноль.
-    //   // Кэп P1b: если S_loser > I_total — не раздуваем I_total выше S_loser*0.95.
-    //   // Выполняется ВСЕГДА (не блокируется pairCost).
-    //   // ════════════════════════════════════════════════════════════════════════════
-    //   const Profit_winner = S_winner - I_total;
-    //   if (Profit_winner < 0 && P_winner < 0.90) {
-    //     const denominator = 1 - P_winner * (1 + profitTarget);
-    //     let dQ_ideal;
-    //     if (denominator <= 0) {
-    //       dQ_ideal = 1;
-    //     } else {
-    //       dQ_ideal = (I_total * (1 + profitTarget) - S_winner) / denominator;
-    //     }
-
-    //     checkPairCost('winner', P_winner, Math.max(Math.ceil(dQ_ideal * 100) / 100, 0.01), 'P2');
-
-    //     let dQ;
-    //     if (S_loser > I_total) {
-    //       const dQ_cap = (S_loser * 0.95 - I_total) / P_winner;
-    //       if (dQ_cap > 0.5) {
-    //         dQ = Math.min(dQ_ideal, dQ_cap);
-    //         if (dQ < dQ_ideal - 0.01) {
-    //           log(`🛡️ [P2] Кэп P1b: идеально x${dQ_ideal.toFixed(2)} → ограничено x${dQ.toFixed(2)} (S_loser=${S_loser.toFixed(2)} сохранён)`);
-    //         }
-    //       } else {
-    //         dQ = dQ_ideal;
-    //       }
-    //     } else {
-    //       dQ = dQ_ideal;
-    //     }
-
-    //     const buySize = Math.ceil(dQ * 100) / 100;
-    //     if (buySize > 0) {
-    //       const sim    = simulate('winner', P_winner, buySize);
-    //       const capped = dQ < dQ_ideal - 0.01;
-    //       if (sim.Profit_winner >= 0) {
-    //         log(`⚡ [P2] ONE SHOT: ${winnerAsset.name} x${buySize} @ ${P_winner} → +${sim.Profit_winner.toFixed(3)}`);
-    //       } else {
-    //         log(`⚡ [P2] PARTIAL: ${winnerAsset.name} x${buySize} @ ${P_winner} → ${sim.Profit_winner.toFixed(3)} [P1b cap]`);
-    //       }
-    //       return ret({
-    //         action: {
-    //           type:       'buy',
-    //           assetId:    winnerAsset.assetId,
-    //           name:       winnerAsset.name,
-    //           size:       buySize,
-    //           amount:     r2(buySize * P_winner),
-    //           price:      P_winner,
-    //           side:       'winner',
-    //           order_type: 'FOK',
-    //           reason:     `P2 ${capped ? 'partial' : 'one-shot'}: ${Profit_winner.toFixed(3)} → ${sim.Profit_winner.toFixed(3)}`,
-    //           nextTurn:   'loser',
-    //           sim,
-    //         }
-    //       });
-    //     }
-    //     log(`⚠️ [P2] buySize=0, передаём в P3/P4`);
-    //   }
-
-    //   // ════════════════════════════════════════════════════════════════════════════
-    //   // P3. nextTurn='winner' → докупаем winner
-    //   //
-    //   // БЛОКИРУЮЩИЙ (v4): если realCostPerShare (с fee) ≥ avg_winner → пропуск.
-    //   // Логика: P3 плановая, не срочная. Если цена невыгодная — ждём.
-    //   // ════════════════════════════════════════════════════════════════════════════
-    //   if (nextTurn === 'winner') {
-    //     if (P_winner >= 0.98) {
-    //       if (P_loser <= 0.20) {
-    //         const sim = simulate('loser', P_loser, 1);
-    //         log(`🚨 [P3→P4] Winner заблокирован @ ${P_winner}, экстренно лузер @ ${P_loser}`);
+    
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     // P2. GTC по текущей цене проигрывающей стороны
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     if (!hasActiveGTC && loser.price < 0.98) {
+    //       const gtcSize = calcRFSize(loser.assetId, loser.price, loser.profit, winner.profit);
+    
+    //       if (gtcSize !== null) {
+    //         const sim = simulate(loser.assetId, loser.price, gtcSize);
+    //         log(`📋 P2 GTC: ${loser.name} x${gtcSize} @ ${loser.price} → A:${sim.Profit_A} B:${sim.Profit_B}`);
     //         return ret({
     //           action: {
-    //             type: 'buy', assetId: loserAsset.assetId, name: loserAsset.name,
-    //             size: 1, amount: r2(1 * P_loser), price: P_loser, side: 'loser', order_type: 'FOK',
-    //             reason: 'winner blocked >= 0.98, emergency loser buy', nextTurn: 'winner', sim,
+    //             type:       'buy',
+    //             assetId:    loser.assetId,
+    //             name:       loser.name,
+    //             size:       gtcSize,
+    //             amount:     r2(gtcSize * loser.price),
+    //             price:      loser.price,
+    //             order_type: 'GTC',
+    //             reason:     `P2 GTC: ${loser.name} @ ${loser.price}`,
+    //             sim,
     //           }
     //         });
     //       }
-    //       return ret({ action: null, reason: 'winner >= 0.98, loser not cheap', nextTurn });
+    //       log(`⏳ P2 RF недостижим через ${loser.name} @ ${loser.price}`);
     //     }
-
-    //     const denominator = 1 - P_winner * (1 + profitTarget);
-    //     const needed      = profitTarget * I_total - Profit_winner;
-    //     let dQ;
-    //     if (needed <= 0 || denominator <= 0) {
-    //       dQ = 0.5 / P_winner;
-    //     } else {
-    //       dQ = needed / denominator;
-    //     }
-    //     const maxBuy  = Math.max(S_winner * 0.20, 1);
-    //     const buySize = Math.round(Math.min(dQ, maxBuy) * 100) / 100;
-
-    //     // ── БЛОКИРОВКА (v4) ──────────────────────────────────────────────────────
-    //     const p3check = checkPairCost('winner', P_winner, buySize, 'P3');
-    //     if (!p3check.improves) {
-    //       log(`⏸ [P3] Пропуск: цена ${P_winner} ≥ avg_winner ${avg_winner.toFixed(3)} (с fee). Ждём.`);
-    //       return ret({
-    //         action:  null,
-    //         reason:  `P3 skipped: ${P_winner} does not improve avg_winner ${avg_winner.toFixed(3)}`,
-    //         nextTurn,
-    //       });
-    //     }
-
-    //     const sim = simulate('winner', P_winner, buySize);
-    //     log(`🛒 [P3] WINNER: ${winnerAsset.name} x${buySize} @ ${P_winner} (улучшает avg)`);
-    //     return ret({
-    //       action: {
-    //         type:       'buy',
-    //         assetId:    winnerAsset.assetId,
-    //         name:       winnerAsset.name,
-    //         size:       buySize,
-    //         amount:     r2(buySize * P_winner),
-    //         price:      P_winner,
-    //         side:       'winner',
-    //         order_type: 'FOK',
-    //         reason:     `scheduled winner buy, improves pairCost (avg=${avg_winner.toFixed(3)})`,
-    //         nextTurn:   'loser',
-    //         sim,
+    
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     // P3. Grid averaging — только если нет активного GTC
+    //     //     Grid хранится в gridState (не в positions)
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     if (!hasActiveGTC) {
+    //       // Инициализация сетки
+    //       if (!loserGrid.gridStartPrice) {
+    //         loserGrid.gridStartPrice = loser.price;
+    //         loserGrid.gridLevels = buildGrid(loser.price);
+    //         log(`🗂 P3 Grid init: ${loser.name} start @ ${loser.price}, уровни: ${loserGrid.gridLevels.map(l => l.price).join(', ')}`);
     //       }
-    //     });
-    //   }
-
-    //   // ════════════════════════════════════════════════════════════════════════════
-    //   // P4. nextTurn='loser' → покупаем лузера при достаточно низкой цене
-    //   //
-    //   // ДИНАМИЧЕСКИЙ ПОРОГ (v4): min(avg_loser * 0.60, 0.35)
-    //   // Покупаем лузера только когда цена реально снижает его среднюю на 40%+.
-    //   // Максимум 0.35 — не покупаем дорого даже при высокой средней.
-    //   //
-    //   // Примеры:
-    //   //   avg_loser=0.65 → порог=0.39
-    //   //   avg_loser=0.50 → порог=0.30
-    //   //   avg_loser=0.30 → порог=0.18
-    //   //   avg_loser=0.10 → порог=0.06
-    //   // ════════════════════════════════════════════════════════════════════════════
-    //   if (P_loser >= 0.98) {
-    //     return ret({ action: null, reason: 'loser >= 0.98', nextTurn });
-    //   }
-
-    //   const loserThreshold = avg_loser > 0
-    //     ? Math.min(avg_loser * 0.60, 0.35)
-    //     : 0.20;
-
-    //   if (P_loser > loserThreshold) {
-    //     log(`⏳ [P4] Ждём лузера ≤ ${loserThreshold.toFixed(2)} (avg_loser=${avg_loser.toFixed(2)}). P_loser=${P_loser.toFixed(3)}`);
-    //     return ret({
-    //       action:   null,
-    //       reason:   `waiting loser <= ${loserThreshold.toFixed(2)}, now: ${P_loser.toFixed(3)}`,
-    //       nextTurn: 'loser',
-    //     });
-    //   }
-
-    //   // Лузер достиг порога — покупаем страховку
-    //   const budgetForLoser = Profit_winner - profitTarget * I_total;
-    //   let loserBuySize;
-    //   if (budgetForLoser > 0) {
-    //     loserBuySize = Math.round(Math.min(
-    //       budgetForLoser / (P_loser * (1 + profitTarget)),
-    //       Math.max(S_winner * 0.30, 1)
-    //     ) * 100) / 100;
-    //   } else {
-    //     loserBuySize = Math.round(
-    //       Math.min(0.30 / P_loser, Math.max(S_winner * 0.30, 1)) * 100
-    //     ) / 100;
-    //   }
-
-    //   if (loserBuySize <= 0) {
-    //     return ret({ action: null, reason: 'loser buySize = 0', nextTurn });
-    //   }
-
-    //   // Информируем (не блокируем) — лузер дёшевый, страховка всегда полезна
-    //   checkPairCost('loser', P_loser, loserBuySize, 'P4');
-
-    //   const sim = simulate('loser', P_loser, loserBuySize);
-    //   log(`🛒 [P4] LOSER: ${loserAsset.name} x${loserBuySize} @ ${P_loser} (порог=${loserThreshold.toFixed(2)})`);
-
-    //   return ret({
-    //     action: {
-    //       type:       'buy',
-    //       assetId:    loserAsset.assetId,
-    //       name:       loserAsset.name,
-    //       size:       loserBuySize,
-    //       amount:     r2(loserBuySize * P_loser),
-    //       price:      P_loser,
-    //       side:       'loser',
-    //       order_type: 'FOK',
-    //       reason:     `loser insurance @ ${P_loser} (threshold=${loserThreshold.toFixed(2)}, avg=${avg_loser.toFixed(3)})`,
-    //       nextTurn:   'winner',
-    //       sim,
+    
+    //       // Следующий нетронутый уровень который уже достигнут
+    //       const nextLevel = loserGrid.gridLevels?.find(l => !l.triggered && loser.price <= l.price);
+    
+    //       if (nextLevel && loser.price < 0.98) {
+    //         const buySize = r2(Math.ceil((1.0 / loser.price) * 100) / 100);
+    //         const cost    = r2(buySize * loser.price);
+    
+    //         if (cost <= budgetLeft) {
+    //           nextLevel.triggered = true;
+    //           const sim = simulate(loser.assetId, loser.price, buySize);
+    //           log(`📉 P3 Grid: ${loser.name} x${buySize} @ ${loser.price} (уровень ${nextLevel.price}, $${cost}) осталось: $${r2(budgetLeft - cost)}`);
+    //           return ret({
+    //             action: {
+    //               type:       'buy',
+    //               assetId:    loser.assetId,
+    //               name:       loser.name,
+    //               size:       buySize,
+    //               amount:     cost,
+    //               price:      loser.price,
+    //               order_type: 'FOK',
+    //               reason:     `P3 grid ${nextLevel.price}: ${loser.name} @ ${loser.price}`,
+    //               sim,
+    //             }
+    //           });
+    //         }
+    //       }
+    //     } else {
+    //       log(`⏸ P3 Grid пропущен — есть активный GTC`);
     //     }
-    //   });
+  
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     // P4. Явный лидер >= 0.66 — докупаем до +5%
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     const LEADER_THRESHOLD = 0.66;
+    //     const leader = P_A >= LEADER_THRESHOLD ? sideA : P_B >= LEADER_THRESHOLD ? sideB : null;
+
+    //     // ← ДОБАВИТЬ СЮДА — блокировка по pairCost
+    //     const avg_A = S_A > 0 ? I_A / S_A : 0;
+    //     const avg_B = S_B > 0 ? I_B / S_B : 0;
+    //     const pairCost = avg_A + avg_B;
+    //     const MAX_PAIR_COST = 1.10;
+
+    //     if (leader && pairCost > MAX_PAIR_COST) {
+    //       log(`⛔ P4 заблокирован — pairCost ${r2(pairCost)} > ${MAX_PAIR_COST}`);
+    //       // переходим к P5
+    //       log(`⏸ Ждём. A:${r2(Profit_A)}(${perc(Profit_A,I_total)}) B:${r2(Profit_B)}(${perc(Profit_B,I_total)}) budget:$${r2(budgetLeft)}`);
+    //       return ret({ action: null, reason: `P4 blocked pairCost ${r2(pairCost)}` });
+    //     }
+
+    //     if (leader && leader.price < 0.98) {
+    //       const targetProfit = I_total * ARBITRAGE_PROFIT_PERCENT;
+
+    //       if (leader.profit < targetProfit) {
+    //         const needed  = (targetProfit - leader.profit) / (1 - leader.price);
+    //         let buySize = r2(Math.max(minSize(leader.price), Math.ceil(needed * 100) / 100));
+    //         let cost    = r2(buySize * leader.price);
+
+    //         // if (cost > budgetLeft) {
+    //         //   buySize = Math.floor((budgetLeft / leader.price) * 100) / 100;
+    //         //   cost    = r2(buySize * leader.price);
+    //         // }
+
+    //         // if (cost < 1) return ret({ action: null, reason: 'P4 skip — affordable amount < $1' });
+
+    //         // ПОСЛЕ:
+    //         const MAX_P4_SINGLE = 10.00;
+
+    //         // Лимит на одну покупку
+    //         if (cost > MAX_P4_SINGLE) {
+    //           buySize = Math.floor((MAX_P4_SINGLE / leader.price) * 100) / 100;
+    //           cost    = r2(buySize * leader.price);
+    //         }
+
+    //         // Если после лимита всё равно не влезает в бюджет
+    //         if (cost > budgetLeft) {
+    //           buySize = Math.floor((budgetLeft / leader.price) * 100) / 100;
+    //           cost    = r2(buySize * leader.price);
+    //         }
+
+    //         if (cost < 1) return ret({ action: null, reason: 'P4 skip — affordable amount < $1' });
+
+
+    //         // if (cost <= budgetLeft) {
+    //           const sim = simulate(leader.assetId, leader.price, buySize);
+    //           log(`📈 P4 Лидер ${leader.name} @ ${leader.price}, x${buySize} до +5%`);
+    //           return ret({
+    //             action: {
+    //               type:       'buy',
+    //               assetId:    leader.assetId,
+    //               name:       leader.name,
+    //               size:       buySize,
+    //               amount:     cost,
+    //               price:      leader.price,
+    //               order_type: 'FOK',
+    //               reason:     `P4 leader ${leader.name} @ ${leader.price}`,
+    //               sim,
+    //             }
+    //           });
+    //         // }
+    //       }
+    //     }        
+
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     // P5. Ждём
+    //     // ════════════════════════════════════════════════════════════════════════════
+    //     log(`⏸ Ждём. A:${r2(Profit_A)}(${perc(Profit_A,I_total)}) B:${r2(Profit_B)}(${perc(Profit_B,I_total)}) budget:$${r2(budgetLeft)}`);
+    //     return ret({ action: null, reason: `waiting. P_A:${P_A} P_B:${P_B}` });
+    
+    //   } catch (err) {
+    //     const errMsg = `❌ recalculate error: ${err.message}`;
+    //     log(errMsg);
+    //     console.error(`[recalculate]`, err);
+    //     return { error: err.message };
+    //   }
     // }
 
-// /**
-//  * recalculate — Gabagool-style binary market hedging strategy
-//  *
-//  * ЛОГИКА ПРИОРИТЕТОВ (в порядке убывания):
-//  *
-//  *  P0.  Risk-free уже достигнут → стоп
-//  *  P1b. Лузер дешёвый (≤ 0.48) → проверяем RF через усреднение лузера
-//  *  P1a. Winner дешёвый (< 0.48) → проверяем RF через winner
-//  *  P2.  Profit_winner < 0 → ONE SHOT до безубытка (с кэпом P1b). Всегда.
-//  *  P3.  nextTurn='winner' → докупаем winner ТОЛЬКО если улучшает pairCost
-//  *  P4.  nextTurn='loser'  → динамический порог min(avg_loser*0.60, 0.35)
-//  *
-//  * ИЗМЕНЕНИЯ v4:
-//  *  - P3 БЛОКИРУЮЩИЙ: цена winner (с fee) ≥ avg_winner → пропуск, ждём
-//  *  - P4 динамический порог: min(avg_loser*0.60, 0.35) вместо фиксированных 0.20
-//  *  - calcFee упрощён (убраны лишние параметры)
-//  *  - avg_winner/avg_loser вычисляются явно
-//  *  - accumulatedFees добавляется в I_total
-//  *
-//  * @param {object}  params
-//  * @param {Array}   params.positions              — [{ asset, size, initialValue }]
-//  * @param {object}  params.entry                  — { assetId, name }
-//  * @param {object}  params.hedge                  — { assetId, name }
-//  * @param {object}  params.opp                    — { id, outcomes, rawEndDate }
-//  * @param {string}  params.nextTurn               — 'winner' | 'loser'
-//  * @param {number}  [params.profitTarget=0.05]    — мин. профит (доля от I_total)
-//  * @param {number}  [params.initialCapital]       — I_A+I_B при первом запуске
-//  * @param {number}  [params.maxCapitalMultiplier=3]
-//  * @param {number}  [params.takerFeeBps=2500]     — crypto=2500 (feeRate=0.25)
-//  * @param {number}  [params.feeExponent=2]        — crypto=2, sports=1
-//  * @param {boolean} [params.feesEnabled=false]    — из маркета: feesEnabled
-//  * @param {number}  [params.accumulatedFees=0]    — накопленные fee (копится в autoBidBot)
-//  * @param {Function}[params.pushMarketLog]
-//  * @param {Function}[params.onSignal]
-//  */
-// function recalculate({
-//   positions,
-//   entry,
-//   hedge,
-//   opp,
-//   nextTurn = 'winner',
-//   profitTarget = 0.05,
-//   maxCapitalMultiplier = 3,
-//   initialCapital,
-//   takerFeeBps = 2500,
-//   feeExponent = 2,
-//   feesEnabled = false,
-//   accumulatedFees = 0,
-//   pushMarketLog,
-//   onSignal,
-// } = {}) {
 
-//   const log  = (text) => { pushMarketLog?.(opp.id, text); onSignal?.({ type: 'bidding', opp, text }); };
-//   const r2   = (n) => Math.round(n * 100) / 100;
-//   const perc = (profit, total) => `${((profit / total) * 100).toFixed(1)}%`;
-
-//   // ─── Комиссия ───────────────────────────────────────────────────────────────
-//   const calcFee = (price, size) => {
-//     if (!feesEnabled) return 0;
-//     const feeRate = takerFeeBps / 10000;
-//     return Math.round(size * price * feeRate * Math.pow(price * (1 - price), feeExponent) * 10000) / 10000;
-//   };
-
-//   // ─── Минимальный ордер $1 (ограничение Polymarket FOK) ──────────────────────
-//   // Все ордера FOK. Если amount < $1 — увеличиваем size до минимума.
-//   const enforceMinAmount = (price, size) => {
-//     const minSize = Math.ceil((1.0 / price) * 100) / 100;
-//     return Math.max(size, minSize);
-//   };
-
-//   // ─── 1. Валидация ───────────────────────────────────────────────────────────
-//   const entryPos = positions.find(p => p.asset === entry.assetId);
-//   const hedgePos = positions.find(p => p.asset === hedge.assetId);
-//   if (!entryPos || !hedgePos) { log(`❌ позиции не найдены`); return null; }
-
-//   const S_A = Number(entryPos.size);
-//   const S_B = Number(hedgePos.size);
-//   const I_A = Number(entryPos.initialValue);
-//   const I_B = Number(hedgePos.initialValue);
-//   const I_total  = I_A + I_B + accumulatedFees;
-//   const avg_A    = S_A > 0 ? I_A / S_A : 0;
-//   const avg_B    = S_B > 0 ? I_B / S_B : 0;
-//   const pairCost = avg_A + avg_B;
-
-//   // ─── 2. Текущие цены ────────────────────────────────────────────────────────
-//   const P_A = Number(opp.outcomes.find(o => o.assetId === entry.assetId)?.price ?? 0);
-//   const P_B = Number(opp.outcomes.find(o => o.assetId === hedge.assetId)?.price ?? 0);
-//   if (!P_A || !P_B) { log(`❌ цены не найдены`); return null; }
-
-//   // ─── 3. Прибыль и состояние ─────────────────────────────────────────────────
-//   const Profit_A          = S_A - I_total;
-//   const Profit_B          = S_B - I_total;
-//   const isRiskFree        = Profit_A > 0 && Profit_B > 0;
-//   const riskFreeProximity = Math.min(Profit_A, Profit_B) / I_total;
-
-//   // ─── 4. Победитель / лузер ──────────────────────────────────────────────────
-//   const winnerAsset = P_A > 0.52 ? entry : (P_B > 0.52 ? hedge : null);
-//   const loserAsset  = P_A > 0.52 ? hedge : (P_B > 0.52 ? entry : null);
-//   const P_winner   = winnerAsset?.assetId === entry.assetId ? P_A : P_B;
-//   const P_loser    = loserAsset?.assetId  === entry.assetId ? P_A : P_B;
-//   const S_winner   = winnerAsset?.assetId === entry.assetId ? S_A : S_B;
-//   const S_loser    = loserAsset?.assetId  === entry.assetId ? S_A : S_B;
-//   const I_winner   = winnerAsset?.assetId === entry.assetId ? I_A : I_B;
-//   const I_loser    = loserAsset?.assetId  === entry.assetId ? I_A : I_B;
-//   const avg_winner = S_winner > 0 ? I_winner / S_winner : 0;
-//   const avg_loser  = S_loser  > 0 ? I_loser  / S_loser  : 0;
-
-//   // ─── Стейт для возвратов ────────────────────────────────────────────────────
-//   const state = {
-//     S_A, S_B, I_A, I_B,
-//     I_total:            r2(I_total),
-//     avg_A:              r2(avg_A),
-//     avg_B:              r2(avg_B),
-//     pairCost:           r2(pairCost),
-//     P_A, P_B,
-//     Profit_A:           r2(Profit_A),
-//     Profit_A_perc:      perc(Profit_A, I_total),
-//     Profit_B:           r2(Profit_B),
-//     Profit_B_perc:      perc(Profit_B, I_total),
-//     isRiskFree, riskFreeProximity,
-//     nextTurn,
-//   };
-//   const ret = (extra) => ({ ...state, ...extra });
-
-//   // ─── Хелпер: симуляция покупки ──────────────────────────────────────────────
-//   const simulate = (side, price, size) => {
-//     const new_S_winner = S_winner + (side === 'winner' ? size : 0);
-//     const new_S_loser  = S_loser  + (side === 'loser'  ? size : 0);
-//     const fee          = calcFee(price, size);
-//     const new_I_total  = I_total + price * size + fee;
-//     const pw = new_S_winner - new_I_total;
-//     const pl = new_S_loser  - new_I_total;
-//     return {
-//       S_winner:           r2(new_S_winner),
-//       S_loser:            r2(new_S_loser),
-//       I_total:            r2(new_I_total),
-//       fee,
-//       fee_perc:           `${(price * size > 0 ? fee / (price * size) * 100 : 0).toFixed(2)}%`,
-//       Profit_winner:      r2(pw),
-//       Profit_winner_perc: perc(pw, new_I_total),
-//       Profit_loser:       r2(pl),
-//       Profit_loser_perc:  perc(pl, new_I_total),
-//       isRiskFree:         pw > 0 && pl > 0,
-//     };
-//   };
-
-//   // ─── Хелпер: улучшает ли покупка pairCost? ──────────────────────────────────
-//   const checkPairCost = (side, price, size, label) => {
-//     const fee              = calcFee(price, size);
-//     const realCostPerShare = (price * size + fee) / size;
-//     const avg_side         = side === 'winner' ? avg_winner : avg_loser;
-//     const improves         = avg_side > 0 ? realCostPerShare < avg_side : true;
-//     const feePerc          = price * size > 0 ? (fee / (price * size) * 100).toFixed(1) : '0';
-//     if (!improves) {
-//       log(`💸 [${label}] pairCost НЕ улучшится: ${realCostPerShare.toFixed(3)} ≥ avg_${side} ${avg_side.toFixed(3)} (fee=${feePerc}%)`);
-//     } else {
-//       log(`✅ [${label}] pairCost улучшится: ${realCostPerShare.toFixed(3)} < avg_${side} ${avg_side.toFixed(3)} (fee=${feePerc}%)`);
-//     }
-//     return { improves, realCostPerShare, avg_side };
-//   };
-
-//   // ════════════════════════════════════════════════════════════════════════════
-//   // P0. Risk-free достигнут
-//   // ════════════════════════════════════════════════════════════════════════════
-//   if (isRiskFree) {
-//     log(`🏆 Risk-free! Profit_A=${Profit_A.toFixed(3)} Profit_B=${Profit_B.toFixed(3)}`);
-//     return ret({ action: null, reason: 'risk-free locked' });
-//   }
-
-//   // ════════════════════════════════════════════════════════════════════════════
-//   // P1b. RF через усреднение ЛУЗЕРА
-//   // ════════════════════════════════════════════════════════════════════════════
-//   if (winnerAsset && loserAsset && P_loser <= 0.48 && P_loser < 0.98) {
-//     const dQ_min = (I_total - S_loser) / (1 - P_loser);
-//     const p1bWinnerBuffer = 0.03;
-//     const dQ_max = (S_winner / (1 + p1bWinnerBuffer) - I_total) / P_loser;
-
-//     if (dQ_max > 0 && (dQ_min <= 0 || dQ_min < dQ_max)) {
-//       const raw_dQ      = Math.max(dQ_min, 0);
-//       const buffered_dQ = raw_dQ / (1 - P_loser * (1 + profitTarget));
-//       const dQ          = Math.min(buffered_dQ > 0 ? buffered_dQ : raw_dQ + 0.5, dQ_max);
-//       const buySize     = enforceMinAmount(P_loser, Math.ceil(Math.max(dQ, 0.01) * 100) / 100);
-
-//       const sim_S_loser = S_loser + buySize;
-//       const sim_fee     = calcFee(P_loser, buySize);
-//       const sim_I_total = I_total + P_loser * buySize + sim_fee;
-//       const sim_pw      = S_winner    - sim_I_total;
-//       const sim_pl      = sim_S_loser - sim_I_total;
-//       const sim_isRF    = sim_pw > 0 && sim_pl > 0;
-
-//       if (sim_isRF) {
-//         const loserName    = loserAsset.assetId === entry.assetId ? entry.name : hedge.name;
-//         const loserAssetId = loserAsset.assetId;
-//         const newAvgLoser  = (I_loser + P_loser * buySize) / sim_S_loser;
-//         log(`🎯 [P1b] RF через лузера! ${loserName} x${buySize} @ ${P_loser} fee:${sim_fee.toFixed(4)} (avg: ${avg_loser.toFixed(3)} → ${newAvgLoser.toFixed(3)})`);
-//         return ret({
-//           action: {
-//             type:       'buy',
-//             assetId:    loserAssetId,
-//             name:       loserName,
-//             size:       buySize,
-//             amount:     r2(buySize * P_loser),
-//             price:      P_loser,
-//             side:       'risk_free_shot',
-//             order_type: 'FOK',
-//             reason:     `loser dropped to ${P_loser}, direct risk-free via averaging`,
-//             nextTurn,
-//             sim: {
-//               I_total:            r2(sim_I_total),
-//               fee:                sim_fee,
-//               fee_perc:           `${(sim_fee / (P_loser * buySize) * 100).toFixed(2)}%`,
-//               Profit_winner:      r2(sim_pw),
-//               Profit_winner_perc: perc(sim_pw, sim_I_total),
-//               Profit_loser:       r2(sim_pl),
-//               Profit_loser_perc:  perc(sim_pl, sim_I_total),
-//               isRiskFree:         sim_isRF,
-//             },
-//           }
-//         });
-//       }
-//     }
-//   }
-
-//   // ─── Нет чёткого победителя ─────────────────────────────────────────────────
-//   if (!winnerAsset || !loserAsset) {
-//     log(`⏸ Нет чёткого победителя. P_A=${P_A} P_B=${P_B}`);
-//     return ret({ action: null, reason: 'no clear winner', nextTurn });
-//   }
-
-//   // ─── Лимит капитала ─────────────────────────────────────────────────────────
-//   const baseCapital  = initialCapital ?? I_total;
-//   const capitalLimit = baseCapital * maxCapitalMultiplier;
-//   const isNearRF     = riskFreeProximity > -0.05;
-//   if (I_total >= capitalLimit && !isNearRF) {
-//     log(`🛑 Лимит капитала. I_total=${I_total.toFixed(2)} лимит=${capitalLimit.toFixed(2)}`);
-//     return ret({ action: null, reason: 'capital limit exceeded', nextTurn });
-//   }
-
-//   // ════════════════════════════════════════════════════════════════════════════
-//   // P1a. RF через докупку WINNER (если winner дёшев < 0.48)
-//   // ════════════════════════════════════════════════════════════════════════════
-//   if (P_winner < 0.48) {
-//     const maxFromLoser = (S_loser - I_total) / P_winner;
-//     if (maxFromLoser > 0) {
-//       const neededForWinner = (I_total - S_winner) / (1 - P_winner);
-//       if (neededForWinner < maxFromLoser) {
-//         const raw_dQ  = Math.max(neededForWinner, 0);
-//         const dQ      = raw_dQ / (1 - P_winner * (1 + profitTarget));
-//         const buySize = enforceMinAmount(P_winner, Math.ceil(Math.max(dQ > 0 ? dQ : raw_dQ + 0.5, 0.01) * 100) / 100);
-//         if (buySize < maxFromLoser) {
-//           const sim = simulate('winner', P_winner, buySize);
-//           if (sim.isRiskFree) {
-//             log(`🎯 [P1a] RF через winner! ${winnerAsset.name} x${buySize} @ ${P_winner}`);
-//             return ret({
-//               action: {
-//                 type:       'buy',
-//                 assetId:    winnerAsset.assetId,
-//                 name:       winnerAsset.name,
-//                 size:       buySize,
-//                 amount:     r2(buySize * P_winner),
-//                 price:      P_winner,
-//                 side:       'winner',
-//                 order_type: 'FOK',
-//                 reason:     `winner cheap at ${P_winner}, direct risk-free`,
-//                 nextTurn:   'loser',
-//                 sim,
-//               }
-//             });
-//           }
-//         }
-//       }
-//     }
-//   }
-
-//   // ════════════════════════════════════════════════════════════════════════════
-//   // P2. Profit_winner < 0 → ONE SHOT до безубытка
-//   //
-//   // Если убыток < $0.05 (micro) — считаем точный размер через neededSize
-//   // и применяем enforceMinAmount. Это защищает от бага с denominator → 0
-//   // когда P_winner ≈ 1/(1+profitTarget) ≈ 0.952 и формула даёт тысячи shares.
-//   //
-//   // Если убыток >= $0.05 — обычная формула one-shot.
-//   // ════════════════════════════════════════════════════════════════════════════
-//   const Profit_winner = S_winner - I_total;
-//   if (Profit_winner < 0 && P_winner < 0.96) {
-
-//     // ── Micro-buy: убыток маленький, покупаем ровно сколько нужно ──────────
-//     if (Profit_winner >= -1.05) {
-//       // neededSize: сколько shares нужно купить чтобы выйти в ноль
-//       // S_winner + x - (I_total + x * P_winner) = 0
-//       // x * (1 - P_winner) = I_total - S_winner = |Profit_winner|
-//       // x = |Profit_winner| / (1 - P_winner)
-//       const neededSize = Math.abs(Profit_winner) / (1 - P_winner);
-//       const buySize    = enforceMinAmount(P_winner, Math.ceil(neededSize * 100) / 100);
-//       const sim        = simulate('winner', P_winner, buySize);
-//       log(`🪙 [P2] Micro-buy: убыток ${Profit_winner.toFixed(3)} → ${winnerAsset.name} x${buySize} @ ${P_winner}`);
-//       return ret({
-//         action: {
-//           type:       'buy',
-//           assetId:    winnerAsset.assetId,
-//           name:       winnerAsset.name,
-//           size:       buySize,
-//           amount:     r2(buySize * P_winner),
-//           price:      P_winner,
-//           side:       'winner',
-//           order_type: 'FOK',
-//           reason:     `P2 micro-buy: Profit_winner=${Profit_winner.toFixed(3)}`,
-//           nextTurn:   'loser',
-//           sim,
-//         }
-//       });
-//     }
-
-//     // ── Обычный P2: считаем сколько нужно для выхода в profitTarget ────────
-//     checkPairCost('winner', P_winner, Math.max(Math.ceil(
-//       ((I_total * (1 + profitTarget) - S_winner) / (1 - P_winner * (1 + profitTarget))) * 100
-//     ) / 100, 0.01), 'P2');
-
-//     const denominator = 1 - P_winner * (1 + profitTarget);
-//     const dQ_ideal = denominator <= 0 ? 1
-//       : (I_total * (1 + profitTarget) - S_winner) / denominator;
-
-//     let dQ;
-//     if (S_loser > I_total) {
-//       const dQ_cap = (S_loser * 0.95 - I_total) / P_winner;
-//       if (dQ_cap > 0.5) {
-//         dQ = Math.min(dQ_ideal, dQ_cap);
-//         if (dQ < dQ_ideal - 0.01) {
-//           log(`🛡️ [P2] Кэп P1b: идеально x${dQ_ideal.toFixed(2)} → ограничено x${dQ.toFixed(2)} (S_loser=${S_loser.toFixed(2)} сохранён)`);
-//         }
-//       } else {
-//         dQ = dQ_ideal;
-//       }
-//     } else {
-//       dQ = dQ_ideal;
-//     }
-
-//     const buySize = enforceMinAmount(P_winner, Math.ceil(dQ * 100) / 100);
-//     if (buySize > 0) {
-//       const sim    = simulate('winner', P_winner, buySize);
-//       const capped = dQ < dQ_ideal - 0.01;
-//       if (sim.Profit_winner >= 0) {
-//         log(`⚡ [P2] ONE SHOT: ${winnerAsset.name} x${buySize} @ ${P_winner} → +${sim.Profit_winner.toFixed(3)}`);
-//       } else {
-//         log(`⚡ [P2] PARTIAL: ${winnerAsset.name} x${buySize} @ ${P_winner} → ${sim.Profit_winner.toFixed(3)} [P1b cap]`);
-//       }
-//       return ret({
-//         action: {
-//           type:       'buy',
-//           assetId:    winnerAsset.assetId,
-//           name:       winnerAsset.name,
-//           size:       buySize,
-//           amount:     r2(buySize * P_winner),
-//           price:      P_winner,
-//           side:       'winner',
-//           order_type: 'FOK',
-//           reason:     `P2 ${capped ? 'partial' : 'one-shot'}: ${Profit_winner.toFixed(3)} → ${sim.Profit_winner.toFixed(3)}`,
-//           nextTurn:   'loser',
-//           sim,
-//         }
-//       });
-//     }
-//     log(`⚠️ [P2] buySize=0, передаём в P3/P4`);
-//   }
-
-//   // ════════════════════════════════════════════════════════════════════════════
-//   // P3. nextTurn='winner' → докупаем winner
-//   // ════════════════════════════════════════════════════════════════════════════
-//   if (nextTurn === 'winner') {
-//     if (P_winner >= 0.98) {
-//       if (P_loser <= 0.20) {
-//         const emergencySize = enforceMinAmount(P_loser, 1);
-//         const sim = simulate('loser', P_loser, emergencySize);
-//         log(`🚨 [P3→P4] Winner заблокирован @ ${P_winner}, экстренно лузер @ ${P_loser}`);
-//         return ret({
-//           action: {
-//             type: 'buy', assetId: loserAsset.assetId, name: loserAsset.name,
-//             size: emergencySize, amount: r2(emergencySize * P_loser), price: P_loser, side: 'loser', order_type: 'FOK',
-//             reason: 'winner blocked >= 0.98, emergency loser buy', nextTurn: 'winner', sim,
-//           }
-//         });
-//       }
-//       return ret({ action: null, reason: 'winner >= 0.98, loser not cheap', nextTurn });
-//     }
-
-//     const denominator = 1 - P_winner * (1 + profitTarget);
-//     const needed      = profitTarget * I_total - Profit_winner;
-//     let dQ;
-//     if (needed <= 0 || denominator <= 0) {
-//       dQ = 0.5 / P_winner;
-//     } else {
-//       dQ = needed / denominator;
-//     }
-//     const maxBuy  = Math.max(S_winner * 0.20, 1);
-//     const buySize = enforceMinAmount(P_winner, Math.round(Math.min(dQ, maxBuy) * 100) / 100);
-
-//     const p3check = checkPairCost('winner', P_winner, buySize, 'P3');
-//     if (!p3check.improves) {
-//       log(`⏸ [P3] Пропуск: цена ${P_winner} ≥ avg_winner ${avg_winner.toFixed(3)} (с fee). Ждём.`);
-//       return ret({
-//         action:  null,
-//         reason:  `P3 skipped: ${P_winner} does not improve avg_winner ${avg_winner.toFixed(3)}`,
-//         nextTurn,
-//       });
-//     }
-
-//     const sim = simulate('winner', P_winner, buySize);
-//     log(`🛒 [P3] WINNER: ${winnerAsset.name} x${buySize} @ ${P_winner} (улучшает avg)`);
-//     return ret({
-//       action: {
-//         type:       'buy',
-//         assetId:    winnerAsset.assetId,
-//         name:       winnerAsset.name,
-//         size:       buySize,
-//         amount:     r2(buySize * P_winner),
-//         price:      P_winner,
-//         side:       'winner',
-//         order_type: 'FOK',
-//         reason:     `scheduled winner buy, improves pairCost (avg=${avg_winner.toFixed(3)})`,
-//         nextTurn:   'loser',
-//         sim,
-//       }
-//     });
-//   }
-
-//   // ════════════════════════════════════════════════════════════════════════════
-//   // P4. nextTurn='loser' → покупаем лузера при достаточно низкой цене
-//   // ════════════════════════════════════════════════════════════════════════════
-//   if (P_loser >= 0.98) {
-//     return ret({ action: null, reason: 'loser >= 0.98', nextTurn });
-//   }
-
-//   const loserThreshold = avg_loser > 0
-//     // ? Math.min(avg_loser * 0.60, 0.35)
-//     ? Math.min(avg_loser * 0.33, 0.20)
-//     : 0.20;
-
-//   if (P_loser > loserThreshold) {
-//     log(`⏳ [P4] Ждём лузера ≤ ${loserThreshold.toFixed(2)} (avg_loser=${avg_loser.toFixed(2)}). P_loser=${P_loser.toFixed(3)}`);
-//     return ret({
-//       action:   null,
-//       reason:   `waiting loser <= ${loserThreshold.toFixed(2)}, now: ${P_loser.toFixed(3)}`,
-//       nextTurn: 'loser',
-//     });
-//   }
-
-//   const budgetForLoser = Profit_winner - profitTarget * I_total;
-//   let loserBuySize;
-//   if (budgetForLoser > 0) {
-//     loserBuySize = Math.round(Math.min(
-//       budgetForLoser / (P_loser * (1 + profitTarget)),
-//       Math.max(S_winner * 0.30, 1)
-//     ) * 100) / 100;
-//   } else {
-//     loserBuySize = Math.round(
-//       Math.min(0.30 / P_loser, Math.max(S_winner * 0.30, 1)) * 100
-//     ) / 100;
-//   }
-
-//   loserBuySize = enforceMinAmount(P_loser, loserBuySize);
-
-//   if (loserBuySize <= 0) {
-//     return ret({ action: null, reason: 'loser buySize = 0', nextTurn });
-//   }
-
-//   checkPairCost('loser', P_loser, loserBuySize, 'P4');
-
-//   const sim = simulate('loser', P_loser, loserBuySize);
-//   log(`🛒 [P4] LOSER: ${loserAsset.name} x${loserBuySize} @ ${P_loser} (порог=${loserThreshold.toFixed(2)})`);
-
-//   return ret({
-//     action: {
-//       type:       'buy',
-//       assetId:    loserAsset.assetId,
-//       name:       loserAsset.name,
-//       size:       loserBuySize,
-//       amount:     r2(loserBuySize * P_loser),
-//       price:      P_loser,
-//       side:       'loser',
-//       order_type: 'FOK',
-//       reason:     `loser insurance @ ${P_loser} (threshold=${loserThreshold.toFixed(2)}, avg=${avg_loser.toFixed(3)})`,
-//       nextTurn:   'winner',
-//       sim,
-//     }
-//   });
-// }
-    
-function recalculate({
-  positions,
-  entry,
-  hedge,
-  opp,
-  nextTurn = 'loser',
-  profitTarget = 0.03,
-  takerFeeBps = 2500,
-  feeExponent = 2,
-  feesEnabled = false,
-  accumulatedFees = 0,
-  pushMarketLog,
-  onSignal,
-} = {}) {
-
-  const log  = (text) => { pushMarketLog?.(opp.id, text); onSignal?.({ type: 'bidding', opp, text }); };
-  const r2   = (n) => Math.round(n * 100) / 100;
-  const perc = (profit, total) => `${((profit / total) * 100).toFixed(1)}%`;
-
-  const calcFee = (price, size) => {
-    if (!feesEnabled) return 0;
-    const feeRate = takerFeeBps / 10000;
-    return Math.round(size * price * feeRate * Math.pow(price * (1 - price), feeExponent) * 10000) / 10000;
-  };
-
-  // Минимальный размер чтобы amount >= $1
-  const enforceMinAmount = (price, size) => {
-    const minSize = Math.ceil((1.0 / price) * 100) / 100;
-    return Math.max(size, minSize);
-  };
-
-  // ─── Валидация ──────────────────────────────────────────────────────────────
-  const entryPos = positions.find(p => p.asset === entry.assetId);
-  const hedgePos = positions.find(p => p.asset === hedge.assetId);
-  if (!entryPos || !hedgePos) { log(`❌ позиции не найдены`); return null; }
-
-  const S_A = Number(entryPos.size);
-  const S_B = Number(hedgePos.size);
-  const I_A = Number(entryPos.initialValue);
-  const I_B = Number(hedgePos.initialValue);
-  const I_total  = I_A + I_B + accumulatedFees;
-  const avg_A    = S_A > 0 ? I_A / S_A : 0;
-  const avg_B    = S_B > 0 ? I_B / S_B : 0;
-  const pairCost = avg_A + avg_B;
-
-  const P_A = Number(opp.outcomes.find(o => o.assetId === entry.assetId)?.price ?? 0);
-  const P_B = Number(opp.outcomes.find(o => o.assetId === hedge.assetId)?.price ?? 0);
-  if (!P_A || !P_B) { log(`❌ цены не найдены`); return null; }
-
-  const Profit_A   = S_A - I_total;
-  const Profit_B   = S_B - I_total;
-  const isRiskFree = Profit_A > 0 && Profit_B > 0;
-  const riskFreeProximity = Math.min(Profit_A, Profit_B) / I_total;
-
-  const state = {
-    S_A, S_B, I_A, I_B,
-    I_total:       r2(I_total),
-    avg_A:         r2(avg_A),
-    avg_B:         r2(avg_B),
-    pairCost:      r2(pairCost),
-    P_A, P_B,
-    Profit_A:      r2(Profit_A),
-    Profit_A_perc: perc(Profit_A, I_total),
-    Profit_B:      r2(Profit_B),
-    Profit_B_perc: perc(Profit_B, I_total),
-    isRiskFree, riskFreeProximity,
-    nextTurn,
-  };
-  const ret = (extra) => ({ ...state, ...extra });
-
-  // ─── Симуляция покупки ──────────────────────────────────────────────────────
-  const simulate = (assetId, price, size) => {
-    const new_S_A = S_A + (assetId === entry.assetId ? size : 0);
-    const new_S_B = S_B + (assetId === hedge.assetId ? size : 0);
-    const fee     = calcFee(price, size);
-    const new_I   = I_total + price * size + fee;
-    const pa = new_S_A - new_I;
-    const pb = new_S_B - new_I;
-    return {
-      S_A: r2(new_S_A), S_B: r2(new_S_B), I_total: r2(new_I),
-      fee, Profit_A: r2(pa), Profit_B: r2(pb),
-      isRiskFree: pa > 0 && pb > 0,
-    };
-  };
-
-  // ─── Поиск размера для RF ────────────────────────────────────────────────────
-  // Покупаем assetId: profit_self растёт, profit_other падает
-  // Условия после покупки x shares:
-  //   profit_self  + x*(1-price) >= I_total_new * profitTarget  (≈ I_total * profitTarget)
-  //   profit_other - x*price     >= I_total_new * profitTarget
-  // Упрощаем (игнорируем рост I_total для расчёта — проверим симуляцией):
-  const findRFSize = (assetId, price, profit_self, profit_other) => {
-    const minProfit = I_total * profitTarget;
-
-    // Нужно купить минимум x_for_self чтобы self вышел в profitTarget
-    const x_for_self = profit_self >= minProfit
-      ? 0
-      : (minProfit - profit_self) / (1 - price);
-
-    // Максимум x_max чтобы other не ушёл ниже profitTarget
-    const x_max = (profit_other - minProfit) / price;
-
-    if (x_max <= 0) return null;           // other уже не покроет даже без покупки
-    if (x_for_self > x_max) return null;   // нельзя удовлетворить оба условия
-
-    const rawSize = x_for_self <= 0
-      ? Math.ceil((1.0 / price) * 100) / 100  // оба уже в плюсе — покупаем минимум
-      : Math.ceil(x_for_self * 100) / 100;
-
-    const size = enforceMinAmount(price, rawSize);
-
-    // Финальная проверка симуляцией
-    const sim = simulate(assetId, price, size);
-    if (!sim.isRiskFree) return null;
-
-    return size;
-  };
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // P0. RF уже достигнут — стоп
-  // ════════════════════════════════════════════════════════════════════════════
-  if (isRiskFree) {
-    log(`🏆 RF! Profit_A=${r2(Profit_A)} Profit_B=${r2(Profit_B)}`);
-    return ret({ action: null, reason: 'risk-free locked' });
-  }
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // P1. Ищем RF через любой из исходов
-  // ════════════════════════════════════════════════════════════════════════════
-  const candidates = [
-    { assetId: entry.assetId, name: entry.name, price: P_A, profit_self: Profit_A, profit_other: Profit_B },
-    { assetId: hedge.assetId, name: hedge.name, price: P_B, profit_self: Profit_B, profit_other: Profit_A },
-  ];
-
-  for (const c of candidates) {
-    if (c.price >= 0.97) continue; // слишком дорого
-
-    const rfSize = findRFSize(c.assetId, c.price, c.profit_self, c.profit_other);
-    if (rfSize !== null) {
-      const sim    = simulate(c.assetId, c.price, rfSize);
-      const amount = r2(rfSize * c.price);
-      log(`🎯 RF через ${c.name}! x${rfSize} @ ${c.price} → A:${sim.Profit_A} B:${sim.Profit_B}`);
-      return ret({
-        action: {
-          type:       'buy',
-          assetId:    c.assetId,
-          name:       c.name,
-          size:       rfSize,
-          amount,
-          price:      c.price,
-          order_type: 'FOK',
-          reason:     `RF via ${c.name}: x${rfSize} @ ${c.price}`,
-          nextTurn,
-          sim,
-        }
-      });
-    }
-    log(`⏳ RF недостижим через ${c.name} @ ${c.price}`);
-  }
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // P2. RF недостижим — смотрим есть ли явный лидер (>= 0.80)
-  // Считаем что он победит, докупаем его
-  // ════════════════════════════════════════════════════════════════════════════
-  const leader   = P_A >= 0.80 ? entry  : (P_B >= 0.80 ? hedge  : null);
-  const underdog = P_A >= 0.80 ? hedge  : (P_B >= 0.80 ? entry  : null);
-  const P_leader   = P_A >= 0.80 ? P_A : P_B;
-  const P_underdog = P_A >= 0.80 ? P_B : P_A;
-
-  if (leader) {
-    // Докупаем лидера на минимум
-    const leaderSize = enforceMinAmount(P_leader, 0);
-    const sim = simulate(leader.assetId, P_leader, leaderSize);
-    log(`📈 Лидер ${leader.name} @ ${P_leader}, докупаем x${leaderSize}`);
-
-    // Попутно: если лузер упал ниже 0.13 — докупаем его для страховки
-    if (P_underdog <= 0.13) {
-      const underdogSize = enforceMinAmount(P_underdog, 0);
-      const simU = simulate(underdog.assetId, P_underdog, underdogSize);
-      log(`🛡️ Лузер ${underdog.name} @ ${P_underdog} <= 0.13, страховка x${underdogSize}`);
-      return ret({
-        action: {
-          type:       'buy',
-          assetId:    underdog.assetId,
-          name:       underdog.name,
-          size:       underdogSize,
-          amount:     r2(underdogSize * P_underdog),
-          price:      P_underdog,
-          order_type: 'FOK',
-          reason:     `underdog insurance @ ${P_underdog} (leader=${leader.name} @ ${P_leader})`,
-          nextTurn,
-          sim:        simU,
-        }
-      });
-    }
-
-    return ret({
-      action: {
-        type:       'buy',
-        assetId:    leader.assetId,
-        name:       leader.name,
-        size:       leaderSize,
-        amount:     r2(leaderSize * P_leader),
-        price:      P_leader,
-        order_type: 'FOK',
-        reason:     `leader buy ${leader.name} @ ${P_leader}`,
-        nextTurn,
-        sim,
-      }
-    });
-  }
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // P3. Нет лидера, RF недостижим — ждём
-  // ════════════════════════════════════════════════════════════════════════════
-  log(`⏸ Нет лидера и RF недостижим. Ждём. A:${r2(Profit_A)} B:${r2(Profit_B)}`);
-  return ret({
-    action:  null,
-    reason:  `waiting. A:${r2(Profit_A)} B:${r2(Profit_B)} P_A:${P_A} P_B:${P_B}`,
-    nextTurn,
-  });
-}
 
     async function sendArbitrageOrder(orderData, opp){
  
@@ -4256,7 +2542,7 @@ function recalculate({
       state.phase = "new_arbitrage_order";
       marketStates.set(opp.id, state);
 
-      logText = `[${nowTime()}] ✅ Placing new arbitrage order. Side: [${orderData.name}] ${orderData.size} shares @ ${orderData.price}`;
+      logText = `[${nowTime()}] ➕ Placing new arbitrage order. Side: [${orderData.name}] ${orderData.size} shares @ ${orderData.price}`;
       pushMarketLog(opp.id, logText);
       onSignal?.({ type: 'bidding', opp, text: logText });     
 
@@ -4328,6 +2614,47 @@ function recalculate({
     return { start };
 }
 
+// Буфер решений в памяти
+const decisionBuffers = new Map(); // marketId → массив решений
+
+function logDecision(marketId, result, state) {
+  if (!decisionBuffers.has(marketId)) {
+    decisionBuffers.set(marketId, []);
+  }
+  
+  const buffer = decisionBuffers.get(marketId);
+  buffer.push({
+    time: nowTime(),
+    action: result.action?.reason || result.reason,
+    P_A: result.P_A,
+    P_B: result.P_B,
+    Profit_A: result.Profit_A,
+    Profit_B: result.Profit_B,
+    budgetLeft: result.budgetLeft,
+    S_A: result.S_A,
+    S_B: result.S_B,
+    hasActiveGTC: !!state.activeGTCOrderId,
+    gridLevels: state.position?.entry?.gridLevels || state.position?.hedge?.gridLevels || null    
+  });
+
+  // Храним только последние 100 решений в памяти
+  if (buffer.length > 100) buffer.shift();
+}
+
+// Сбрасываем на диск раз в 30 секунд асинхронно
+setInterval(() => {
+  for (const [marketId, buffer] of decisionBuffers.entries()) {
+    if (buffer.length === 0) continue;
+    
+    const filename = `./data/actions_logs/${marketId}.json`;
+    const data = JSON.stringify(buffer, null, 2);
+    
+    // writeFile асинхронный — не блокирует event loop
+    fs.writeFile(filename, data, (err) => {
+      if (err) console.error(`Failed to write decisions for ${marketId}:`, err);
+    });
+  }
+}, 30_000);
 
 // Убрать следующие тесты
 // в placeorder тестовый response +

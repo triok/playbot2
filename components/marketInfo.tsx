@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 interface MarketInfoProps {
   conditionId: string;
   slug: string;
-   any;
+  any;
   onClose: () => void;
 }
 
@@ -26,6 +26,8 @@ export default function MarketInfo({ conditionId, slug, data, onClose }: MarketI
   const [logs, setLogs] = useState<any[]>([]);
   const [logsLoading, setLogsLoading] = useState(true);
   const [logsError, setLogsError] = useState<string | null>(null);
+  const [showMarketData, setShowMarketData] = useState(false);
+  const [showOppData, setShowOppData] = useState(false);
 
   // Загрузка логов при монтировании компонента
   useEffect(() => {
@@ -104,6 +106,73 @@ export default function MarketInfo({ conditionId, slug, data, onClose }: MarketI
     return CATEGORY_COLORS[category as keyof typeof CATEGORY_COLORS] || CATEGORY_COLORS.default;
   };
 
+  // Копирование информации о позициях
+  const formatPositionsForGPT = () => {
+    if (!data.positionsHistory || data.positionsHistory.length === 0) {
+      return 'No positions history';
+    }
+  
+    let output = `Market: ${slug}\nCondition ID: ${conditionId}\n\n`;
+  
+    data.positionsHistory.forEach((snap: any, index: number) => {
+      const totalInvested = snap.positions.reduce(
+        (sum: number, p: any) => sum + Number(p.initialValue), 0
+      );
+  
+      output += `=== SNAPSHOT #${index + 1} ===\n`;
+      output += `Time: ${snap.time}\n`;
+      output += `Total Invested: ${totalInvested.toFixed(4)}\n\n`;
+  
+      snap.positions.forEach((p: any, i: number) => {
+        const avgPrice = p.size > 0
+          ? Number(p.initialValue) / Number(p.size)
+          : 0;
+  
+        output += `Position ${i === 0 ? 'A' : 'B'}:\n`;
+        output += `- Outcome: ${p.outcome}\n`;
+        output += `- Current Price: ${p.currentPrice ?? '—'}\n`;
+        output += `- Size: ${Number(p.size).toFixed(2)}\n`;
+        output += `- Initial Value: ${Number(p.initialValue).toFixed(4)}\n`;
+        output += `- Avg Price: ${avgPrice.toFixed(4)}\n\n`;
+      });
+  
+      output += `-----------------------------\n\n`;
+    });
+  
+    return output;
+  };
+
+  const copyPositions = () => {
+    const text = formatPositionsForGPT();
+  
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+  
+      // важно для мобильных и overlay
+      textarea.style.position = 'fixed';
+      textarea.style.top = '0';
+      textarea.style.left = '0';
+      textarea.style.opacity = '0';
+  
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+  
+      const success = document.execCommand('copy');
+  
+      document.body.removeChild(textarea);
+  
+      if (success) {
+        alert('Copied ✅');
+      } else {
+        alert('Copy failed ❌');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Copy error ❌');
+    }
+  }; 
   return (
     <div 
       className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-4 overflow-auto"
@@ -141,40 +210,58 @@ export default function MarketInfo({ conditionId, slug, data, onClose }: MarketI
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Market Data */}
             <div className="bg-slate-800 rounded-lg p-6">
-              <h2 className="text-xl font-bold text-indigo-300 mb-4">📈 Market Data</h2>
-              <div className="space-y-3 text-sm max-h-[60vh] overflow-y-auto">
-                {Object.entries(data.market || {}).map(([key, value]) => (
-                  <div key={key} className="flex justify-between border-b border-slate-700 pb-2">
-                    <span className="text-slate-400">
-                      {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:
-                    </span>
-                    <span className="text-slate-200 font-mono break-all max-w-[300px] text-right">
-                      {typeof value === 'boolean' ? (value ? 'true' : 'false') : 
-                       typeof value === 'object' ? JSON.stringify(value, null, 2) : 
-                       String(value)}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <button
+                onClick={() => setShowMarketData(v => !v)}
+                className="w-full flex justify-between items-center text-left"
+              >
+                <h2 className="text-xl font-bold text-indigo-300">📈 Market Data</h2>
+                <span className="text-slate-400 text-sm">{showMarketData ? '▲ Свернуть' : '▼ Развернуть'}</span>
+              </button>
+
+              {showMarketData && (
+                <div className="space-y-3 text-sm max-h-[60vh] overflow-y-auto mt-4">
+                  {Object.entries(data.market || {}).map(([key, value]) => (
+                    <div key={key} className="flex justify-between border-b border-slate-700 pb-2">
+                      <span className="text-slate-400">
+                        {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:
+                      </span>
+                      <span className="text-slate-200 font-mono break-all max-w-[300px] text-right">
+                        {typeof value === 'boolean' ? (value ? 'true' : 'false') :
+                        typeof value === 'object' ? JSON.stringify(value, null, 2) :
+                        String(value)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Opportunity Data */}
             <div className="bg-slate-800 rounded-lg p-6">
-              <h2 className="text-xl font-bold text-indigo-300 mb-4">🎯 Opportunity Data</h2>
-              <div className="space-y-3 text-sm max-h-[60vh] overflow-y-auto">
-                {Object.entries(data.opp || {}).map(([key, value]) => (
-                  <div key={key} className="flex justify-between border-b border-slate-700 pb-2">
-                    <span className="text-slate-400">
-                      {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:
-                    </span>
-                    <span className="text-slate-200 font-mono break-all max-w-[300px] text-right">
-                      {typeof value === 'boolean' ? (value ? 'true' : 'false') : 
-                       typeof value === 'object' ? JSON.stringify(value, null, 2) : 
-                       String(value)}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <button
+                onClick={() => setShowOppData(v => !v)}
+                className="w-full flex justify-between items-center text-left"
+              >
+                <h2 className="text-xl font-bold text-indigo-300">🎯 Opportunity Data</h2>
+                <span className="text-slate-400 text-sm">{showOppData ? '▲ Свернуть' : '▼ Развернуть'}</span>
+              </button>
+
+              {showOppData && (
+                <div className="space-y-3 text-sm max-h-[60vh] overflow-y-auto mt-4">
+                  {Object.entries(data.opp || {}).map(([key, value]) => (
+                    <div key={key} className="flex justify-between border-b border-slate-700 pb-2">
+                      <span className="text-slate-400">
+                        {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:
+                      </span>
+                      <span className="text-slate-200 font-mono break-all max-w-[300px] text-right">
+                        {typeof value === 'boolean' ? (value ? 'true' : 'false') :
+                        typeof value === 'object' ? JSON.stringify(value, null, 2) :
+                        String(value)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Additional Text */}
@@ -193,20 +280,31 @@ export default function MarketInfo({ conditionId, slug, data, onClose }: MarketI
             <div className="mt-8 bg-slate-800 rounded-lg p-6">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-bold text-indigo-300">📊 Positions History</h2>
-                {(() => {
-                  const lastSnap = data.positionsHistory[data.positionsHistory.length - 1];
-                  const totalInvested = lastSnap?.positions?.reduce(
-                    (sum: number, p: any) => sum + Number(p.initialValue), 0
-                  ) ?? 0;
-                  return (
-                    <span className="text-sm text-slate-400 font-mono">
-                      Total invested:{' '}
-                      <span className="text-green-400 font-bold">
-                        ${totalInvested.toFixed(4)}
+
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={copyPositions}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-1 rounded"
+                  >
+                    📋 Copy for GPT
+                  </button>
+
+                  {(() => {
+                    const lastSnap = data.positionsHistory[data.positionsHistory.length - 1];
+                    const totalInvested = lastSnap?.positions?.reduce(
+                      (sum: number, p: any) => sum + Number(p.initialValue), 0
+                    ) ?? 0;
+                    return (
+                      <span className="text-sm text-slate-400 font-mono">
+                        Total invested:{' '}
+                        <span className="text-green-400 font-bold">
+                          ${totalInvested.toFixed(4)}
+                        </span>
                       </span>
-                    </span>
-                  );
-                })()}
+                    );
+                  })()}
+                </div>                
+
               </div>
 
               <div className="space-y-4">
@@ -237,6 +335,7 @@ export default function MarketInfo({ conditionId, slug, data, onClose }: MarketI
                             <tr className="border-b border-slate-700">
                               <th className="text-left text-slate-500 pb-2 pr-3">#</th>
                               <th className="text-left text-slate-500 pb-2 pr-3">Outcome</th>
+                              <th className="text-right text-slate-500 pb-2 pr-3">Cur.Price</th>
                               <th className="text-right text-slate-500 pb-2 pr-3">Size</th>
                               <th className="text-right text-slate-500 pb-2 pr-3">Initial $</th>
                               <th className="text-right text-slate-500 pb-2 pr-3">Avg</th>
@@ -275,6 +374,9 @@ export default function MarketInfo({ conditionId, slug, data, onClose }: MarketI
                                   <td className="py-2 pr-3 text-slate-200 font-semibold">
                                     {p.outcome}
                                   </td>
+                                  <td className="py-2 pr-3 text-right text-slate-400">
+                                    {p.currentPrice != null ? p.currentPrice.toFixed(3) : '—'}
+                                  </td>                                  
                                   <td className="py-2 pr-3 text-right text-slate-300">
                                     {Number(p.size).toFixed(2)}
                                   </td>
@@ -296,7 +398,7 @@ export default function MarketInfo({ conditionId, slug, data, onClose }: MarketI
                           </tbody>
                           <tfoot>
                             <tr className="border-t border-slate-600">
-                              <td colSpan={4} className="pt-2 text-slate-500 text-xs">
+                              <td colSpan={5} className="pt-2 text-slate-500 text-xs">
                                 pairCost:{' '}
                                 {snap.positions.length >= 2 ? (() => {
                                   const avg0 = snap.positions[0].size > 0
@@ -324,6 +426,72 @@ export default function MarketInfo({ conditionId, slug, data, onClose }: MarketI
               </div>
             </div>
           )}          
+
+          {/* Action Logs */}
+          {data.actionLogs && data.actionLogs.length > 0 && (
+            <div className="mt-8 bg-slate-800 rounded-lg p-6">
+              <h2 className="text-xl font-bold text-indigo-300 mb-4">
+                🤖 Action Logs
+                <span className="ml-3 text-sm font-normal text-slate-400">
+                  {data.actionLogs.length} записей
+                </span>
+              </h2>
+
+              <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+                <table className="w-full text-xs font-mono">
+                  <thead className="sticky top-0 bg-slate-800">
+                    <tr className="border-b border-slate-600">
+                      <th className="text-left text-slate-400 pb-2 pr-4 py-2">Time</th>
+                      <th className="text-right text-slate-400 pb-2 pr-4 py-2">P_A</th>
+                      <th className="text-right text-slate-400 pb-2 pr-4 py-2">P_B</th>
+                      <th className="text-right text-slate-400 pb-2 pr-4 py-2">Profit A</th>
+                      <th className="text-right text-slate-400 pb-2 pr-4 py-2">Profit B</th>
+                      <th className="text-right text-slate-400 pb-2 pr-4 py-2">Budget Left</th>
+                      <th className="text-left text-slate-400 pb-2 py-2">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.actionLogs.map((entry: any, i: number) => {
+                      const profitAColor = entry.Profit_A > 0
+                        ? 'text-green-400' : entry.Profit_A < 0
+                        ? 'text-red-400' : 'text-slate-400';
+                      const profitBColor = entry.Profit_B > 0
+                        ? 'text-green-400' : entry.Profit_B < 0
+                        ? 'text-red-400' : 'text-slate-400';
+                      const isWaiting   = entry.action?.startsWith('waiting');
+                      const isBuy       = entry.action?.includes('buy') || entry.action?.includes('P1') || entry.action?.includes('P2') || entry.action?.includes('P3') || entry.action?.includes('P4');
+                      const isRisk      = entry.action?.includes('Risk') || entry.action?.includes('LAST') || entry.action?.includes('frozen');
+
+                      const actionColor = isRisk    ? 'text-red-400'
+                                        : isBuy     ? 'text-green-400'
+                                        : isWaiting ? 'text-slate-500'
+                                        : 'text-yellow-400';
+
+                      return (
+                        <tr key={i} className="border-b border-slate-700/50 hover:bg-slate-700/30">
+                          <td className="py-1.5 pr-4 text-slate-400">{entry.time}</td>
+                          <td className="py-1.5 pr-4 text-right text-slate-300">{entry.P_A?.toFixed(2)}</td>
+                          <td className="py-1.5 pr-4 text-right text-slate-300">{entry.P_B?.toFixed(2)}</td>
+                          <td className={`py-1.5 pr-4 text-right font-bold ${profitAColor}`}>
+                            {entry.Profit_A >= 0 ? '+' : ''}{entry.Profit_A?.toFixed(2)}
+                          </td>
+                          <td className={`py-1.5 pr-4 text-right font-bold ${profitBColor}`}>
+                            {entry.Profit_B >= 0 ? '+' : ''}{entry.Profit_B?.toFixed(2)}
+                          </td>
+                          <td className="py-1.5 pr-4 text-right text-slate-400">
+                            ${entry.budgetLeft?.toFixed(2)}
+                          </td>
+                          <td className={`py-1.5 ${actionColor} max-w-[300px] truncate`} title={entry.action}>
+                            {entry.action}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Technical Logs */}
           <div className="mt-8 bg-slate-800 rounded-lg p-6">
@@ -407,26 +575,6 @@ export default function MarketInfo({ conditionId, slug, data, onClose }: MarketI
               </div>
             )}
           </div>
-
-          {/* Raw JSON
-          <div className="mt-8 bg-slate-800 rounded-lg p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold text-indigo-300">🔍 Raw JSON</h2>
-              <button
-                onClick={copyJSON}
-                className={`px-4 py-2 rounded transition ${
-                  copied 
-                    ? 'bg-green-600 text-white' 
-                    : 'bg-indigo-600 text-white hover:bg-indigo-700'
-                }`}
-              >
-                {copied ? '✅ Скопировано!' : '📋 Скопировать JSON'}
-              </button>
-            </div>
-            <pre className="bg-slate-900 p-4 rounded overflow-auto text-xs text-slate-400 max-h-[400px]">
-              {JSON.stringify(data, null, 2)}
-            </pre>
-          </div> */}
         </div>
       </div>
     </div>

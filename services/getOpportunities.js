@@ -103,6 +103,8 @@ export async function getOpportunities({
       const hasRecentVolume = Number(market.volume24hrClob || 0) > 1000;
       // const tightSpread = Number(market.spread || 1) <= 0.02;
       
+      if (endDate <= now) continue; // убирает события которые уже закончились, временный фильтр для тестов
+
       // Основной фильтр
       if (!isAcceptingOrders) continue;
       
@@ -208,7 +210,6 @@ export async function getOpportunities({
       // if(event.live){
       //   console.log(event);
       // }
-      // console.log(opp);
 
       // ФИЛЬТР Стоп теги
       if (hasStopTag) {
@@ -218,8 +219,9 @@ export async function getOpportunities({
       if (!isCryptoMarket(opp) && !hasAllowedTag) {
         continue;   // ❌ НЕ крипта — пропускаем
       }     
-      // console.log(opp);
-      if((opp.marketType == '5M' && opp.keyword == 'bitcoin') || opp.marketType == '15M' || opp.marketType == '1H'){
+
+      // if((opp.marketType == '5M' && opp.keyword == 'bitcoin') || opp.marketType == '15M' || opp.marketType == '1H'){
+        if(opp.marketType == '15M'){
         opportunities.push(opp);  
       }
       // if(startDate != 0){
@@ -236,8 +238,8 @@ export async function getOpportunities({
   
     console.log(`[GET OPPORTUNITIES] Found ${opportunities.length} opportunities`);
     // if (opportunities.length > 0) {
-      // return [opportunities[0]];
-      // return opportunities.slice(0, 2);
+    //   // return [opportunities[0]];
+    //   return opportunities.slice(0, 14);
     // }
     // return [];
     return opportunities;

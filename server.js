@@ -35,7 +35,7 @@ import { getRelayClient } from "./services/relayClient.js";
 import { initPolymarketWS } from "./services/polymarketHandler.js";
 import { createAutoBidBot } from "./services/autoBidBot.js";
 import { initCache, getCachedOpportunities, addOpportunities, checkMarket, syncResolvedMarkets, cleanupResolvedButUnusedMarkets, removeMarketFromCache, getMarketOrderBook, clearAllOpportunities, setArbitrageToMarket } from './services/marketCache.js';
-import { marketLogs, clearAllMarketLogs } from './services/marketLogs.js';
+import { marketLogs, clearAllMarketLogs, getMarketActions } from './services/marketLogs.js';
 import { marketStates } from './services/marketStates.js';
 import { getAutoBidState, setAutoBidState } from './services/botState.js';
 import { placeOrder, placeOrderSell, placeTestOrder, placeArbitrageOrder } from "./services/placeOrder.js";
@@ -313,8 +313,11 @@ wss.on('connection', async (ws) => {
         const { market, opp, text } = await checkMarket(client, conditionId);
         let state = marketStates.get(opp.id) ?? {};
 
-        let positions = getUserCurrentPositions(process.env.FUNDER_ADDRESS, conditionId);
+        let positions = await getUserCurrentPositions(process.env.FUNDER_ADDRESS, conditionId);
         console.log(`server, positions: `, positions);
+
+        const actionLogs = await getMarketActions(opp.id);
+
         // ✅ Отправляем данные обратно через вебсокет
         ws.send(JSON.stringify({
           type: "full_market_info_response",
@@ -327,6 +330,7 @@ wss.on('connection', async (ws) => {
             text: text,
             positionsHistory: state.positionsHistory || [],
             initialCapital: state.initialCapital  || 0,
+            actionLogs: actionLogs,
             timestamp: new Date().toISOString()
           }
         }));        
@@ -627,8 +631,6 @@ app.post("/api/arbitrage-event", async (req, res) => {
     if (!conditionId) {
       return res.status(400).json({ success: false, error: "conditionId is required" });
     }
-
-
     const setFlag = setArbitrageToMarket(conditionId);
 
     if (setFlag) {
@@ -642,3 +644,4 @@ app.post("/api/arbitrage-event", async (req, res) => {
     res.status(500).json({ success: false, error: e.message });
   }
 });
+

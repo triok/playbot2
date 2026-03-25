@@ -191,6 +191,25 @@ export class UserPolymarketWebsocket { // ← Имя класса с загла�
                 console.log(`[RETRY] ❌ Order ${id} not found in file`);
               }
             }
+            if(type === 'CANCELLATION'){
+              const currentOpportunities = this.getCachedOpportunities();
+              const opp = currentOpportunities.find(o => o.conditionId === market);               
+              if(opp){
+                const currentState = marketStates.get(opp.id) || {};
+                if (currentState.arbitrage === true && Array.isArray(currentState.orders)) {
+                  const order = currentState.orders.find(
+                    o => o.orderId === id
+                  );
+              
+                  if (order) {
+                    order.status = 'CANCELLED';
+                    marketStates.set(opp.id, currentState);
+                    const logText = `[${nowTime()}] WS User: Arbitrage order ${order.status} | orderId=${id}`;
+                    pushMarketLog(opp.id, logText);                       
+                  }                
+                }
+              }
+            }
             console.log(`[${nowTime()}] WS User:`, json);
           }
         

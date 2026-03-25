@@ -157,3 +157,24 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 // ============ Хранение технической информации ============
+
+
+/**
+ * Берем логи по действиям и передаём их на фронт
+ */
+export async function getMarketActions(oppId) {
+
+  try {
+    const filePath = path.join(process.cwd(), 'data', 'actions_logs', `${oppId}.json`);
+    
+    if (!fs.existsSync(filePath)) {
+      return [];
+    }
+    
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    return JSON.parse(raw);
+  } catch (error) {
+    console.error(`getMarketActions error for ${oppId}:`, error);
+    return [];
+  }
+}

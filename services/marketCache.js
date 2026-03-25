@@ -219,14 +219,13 @@ export function cleanupResolvedButUnusedMarkets() {
       // Случай 1: вообще нет состояния → точно не участвовали
       if (!state) {
         console.log(`[MARKET CACHE] Removing expired market (no state): ${opp.title} (${opp.id})`);
-        // if (opp.outcomes && Array.isArray(opp.outcomes)) {
-        //   opp.outcomes.forEach(outcome => {
-        //     if (outcome.assetId) {
-        //       assetsToUnsubscribe.push(outcome.assetId);
-        //     }
-        //   });
-        // }
+        opp.outcomes?.forEach(o => { if (o.assetId) assetsToUnsubscribe.push(o.assetId); });
         return false;
+      }
+
+      // истёк + resolved → отписываемся но оставляем в кэше
+      if (state.resolved != null) {
+        opp.outcomes?.forEach(o => { if (o.assetId) assetsToUnsubscribe.push(o.assetId); });
       }
 
       // Случай 2: есть состояние, но бот не участвовал

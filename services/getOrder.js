@@ -7,10 +7,10 @@ export async function getOrder(orderID, client) {
         if (arbitrageTestFlag) {
           //  тест -->
           order = {
-              id: 123,
+              id: orderID,
               status: "MATCHED",
               price: 0.42,
-              size_matched: 12
+              size_matched: 20
           }
           // <-- тест 
         } else {

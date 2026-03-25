@@ -35,8 +35,6 @@ export function initPolymarketWS({ getCachedOpportunities, broadcast, changedOpp
     // 2. ✅ ВСЕГДА получаем АКТУАЛЬНЫЙ кэш
     const currentOpportunities = getCachedOpportunities();
     if (msg.event_type === "price_change") {
-      // 
-      // const currentOpportunities = getCachedOpportunities();
 
       // 3. Обновляем кэш
       const { updatedOpportunities, dirty } = applyPriceChanges(
@@ -61,7 +59,10 @@ export function initPolymarketWS({ getCachedOpportunities, broadcast, changedOpp
             id: updatedMarket.id,
             outcomes: updatedMarket.outcomes.map(o => ({
               assetId: o.assetId,
-              price: o.price
+              price: o.price,
+              size: o.size,         
+              best_ask: o.best_ask, 
+              best_bid: o.best_bid  
             })),
             bestOutcome: updatedMarket.bestOutcome
           }];

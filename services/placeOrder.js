@@ -328,7 +328,8 @@ export async function placeArbitrageOrder(clobClient, orderParams, maxAttempts =
       // тесты -->
       if (arbitrageTestFlag) {
         // Случайный успех ордера (true или false)
-        const isSuccess = Math.random() > 0.2;
+        // const isSuccess = Math.random() > 0.5;
+        const isSuccess = true;
         let random_order_id = generateOrderId();
         response = {
           status: "fake",

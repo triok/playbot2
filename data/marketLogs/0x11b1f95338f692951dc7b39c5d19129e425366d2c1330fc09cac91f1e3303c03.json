@@ -1,0 +1,242 @@
+[
+  {
+    "timestamp": "2026-03-21T13:30:07.610Z",
+    "local_time": "16:30:07",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[16:30:07] Ответ от placeArbitrageOrder",
+      "status": "fake",
+      "success": true,
+      "orderId": "17740998015999308946",
+      "price": 0.42,
+      "size": 6,
+      "errorMsg": "fake order",
+      "orderPriceMinTickSize": "0.01"
+    }
+  },
+  {
+    "timestamp": "2026-03-21T13:30:07.610Z",
+    "local_time": "16:30:07",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[16:30:07] Ответ от placeArbitrageOrder",
+      "status": "fake",
+      "success": true,
+      "orderId": "17740998015993569324",
+      "price": 0.42,
+      "size": 6,
+      "errorMsg": "fake order",
+      "orderPriceMinTickSize": "0.01"
+    }
+  },
+  {
+    "timestamp": "2026-03-21T13:30:07.610Z",
+    "local_time": "16:30:07",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[16:30:07] ✅ Both initial orders placed, next phase \"waiting_first_match\""
+    }
+  },
+  {
+    "timestamp": "2026-03-21T13:30:08.625Z",
+    "local_time": "16:30:08",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[16:30:08] State phase: [waiting_first_match]. First order matched [Down] for 0.41, cancelling other..."
+    }
+  },
+  {
+    "timestamp": "2026-03-21T13:30:08.626Z",
+    "local_time": "16:30:08",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[16:30:08] State phase: [first_matched]. Second cancelled, next phase: \"first_matched\"  get_positions."
+    }
+  },
+  {
+    "timestamp": "2026-03-21T13:30:08.626Z",
+    "local_time": "16:30:08",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[16:30:08] State phase: [first_matched]. Get order result:",
+      "order": {
+        "id": "17740998015993569324",
+        "status": "MATCHED",
+        "price": 0.42,
+        "size_matched": 6
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-21T13:30:08.626Z",
+    "local_time": "16:30:08",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[16:30:08] State phase: [first_matched]. Entry confirmed [Down]: 6 shares, \"@\", 0.41. Next phase: \"recalculate\""
+    }
+  },
+  {
+    "timestamp": "2026-03-21T13:30:09.630Z",
+    "local_time": "16:30:09",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[16:30:09] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.6\", need: 6.31 shares, \"@\", $3.78"
+    }
+  },
+  {
+    "timestamp": "2026-03-21T13:30:16.635Z",
+    "local_time": "16:30:16",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[16:30:16] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "status": "fake",
+        "success": true,
+        "orderID": "17740998106319593472",
+        "takingAmount": "",
+        "makingAmount": "",
+        "errorMsg": "fake order"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-21T13:30:17.653Z",
+    "local_time": "16:30:17",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[16:30:17] State phase: [waiting_first_hedge_fill]. Hedge orders matched. Recalculating positions..."
+    }
+  },
+  {
+    "timestamp": "2026-03-21T13:30:23.659Z",
+    "local_time": "16:30:23",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[16:30:23] Action: ",
+      "result": {
+        "S_A": 6,
+        "S_B": 6.31,
+        "I_A": 2.46,
+        "I_B": 3.9122,
+        "I_total": 6.37,
+        "P_A": 0.32,
+        "P_B": 0.69,
+        "Profit_A": -0.37,
+        "Profit_A_perc": "-5.8%",
+        "Profit_B": -0.06,
+        "Profit_B_perc": "-1.0%",
+        "isRiskFree": false,
+        "budgetLeft": 143.63,
+        "nextTurn": "winner",
+        "action": {
+          "type": "buy",
+          "assetId": "104663162369978181715872224160367137268524492657527859793761491586080886686162",
+          "name": "Up",
+          "size": 2.67,
+          "amount": 1.84,
+          "price": 0.69,
+          "order_type": "FOK",
+          "reason": "P4 leader Up @ 0.69",
+          "sim": {
+            "S_A": 6,
+            "S_B": 8.98,
+            "I_total": 8.21,
+            "Profit_A": -2.21,
+            "Profit_B": 0.77,
+            "isRiskFree": false
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-21T13:30:43.743Z",
+    "local_time": "16:30:43",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[16:30:43] State phase: [waiting_arbitrage_fill]. All arbitrage orders matched. Recalculating positions..."
+    }
+  },
+  {
+    "timestamp": "2026-03-21T13:30:49.757Z",
+    "local_time": "16:30:49",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[16:30:49] Action: ",
+      "result": {
+        "S_A": 6,
+        "S_B": 8.98,
+        "I_A": 2.46,
+        "I_B": 5.7011,
+        "I_total": 8.16,
+        "P_A": 0.29,
+        "P_B": 0.73,
+        "Profit_A": -2.16,
+        "Profit_A_perc": "-26.5%",
+        "Profit_B": 0.82,
+        "Profit_B_perc": "10.0%",
+        "isRiskFree": false,
+        "budgetLeft": 141.84,
+        "nextTurn": "winner",
+        "action": {
+          "type": "buy",
+          "assetId": "104663162369978181715872224160367137268524492657527859793761491586080886686162",
+          "name": "Up",
+          "size": 1.37,
+          "amount": 1,
+          "price": 0.73,
+          "order_type": "FOK",
+          "reason": "P4 leader Up @ 0.73",
+          "sim": {
+            "S_A": 6,
+            "S_B": 10.35,
+            "I_total": 9.16,
+            "Profit_A": -3.16,
+            "Profit_B": 1.19,
+            "isRiskFree": false
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-21T13:31:10.871Z",
+    "local_time": "16:31:10",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[16:31:10] State phase: [waiting_arbitrage_fill]. All arbitrage orders matched. Recalculating positions..."
+    }
+  },
+  {
+    "timestamp": "2026-03-21T13:46:13.625Z",
+    "local_time": "16:46:13",
+    "category": "polymarket_handler",
+    "data": {
+      "message": "Tick size changed to: \"0.001\""
+    }
+  },
+  {
+    "timestamp": "2026-03-21T13:46:13.626Z",
+    "local_time": "16:46:13",
+    "category": "polymarket_handler",
+    "data": {
+      "message": "Tick size changed to: \"0.001\""
+    }
+  },
+  {
+    "timestamp": "2026-03-21T13:46:13.628Z",
+    "local_time": "16:46:13",
+    "category": "polymarket_handler",
+    "data": {
+      "message": "Tick size changed to: \"0.001\""
+    }
+  },
+  {
+    "timestamp": "2026-03-21T13:46:47.489Z",
+    "local_time": "16:46:47",
+    "category": "polymarket_handler",
+    "data": {
+      "message": "Resolved: \"Down\""
+    }
+  }
+]

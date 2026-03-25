@@ -1,0 +1,211 @@
+[
+  {
+    "timestamp": "2026-03-21T19:00:07.239Z",
+    "local_time": "22:00:07",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[22:00:07] Ответ от placeArbitrageOrder",
+      "status": "fake",
+      "success": true,
+      "orderId": "17741196012349693520",
+      "price": 0.42,
+      "size": 25,
+      "errorMsg": "fake order",
+      "orderPriceMinTickSize": "0.01"
+    }
+  },
+  {
+    "timestamp": "2026-03-21T19:00:07.239Z",
+    "local_time": "22:00:07",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[22:00:07] Ответ от placeArbitrageOrder",
+      "status": "fake",
+      "success": true,
+      "orderId": "17741196012347104181",
+      "price": 0.42,
+      "size": 25,
+      "errorMsg": "fake order",
+      "orderPriceMinTickSize": "0.01"
+    }
+  },
+  {
+    "timestamp": "2026-03-21T19:00:07.239Z",
+    "local_time": "22:00:07",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[22:00:07] ✅ Both initial orders placed, next phase \"waiting_first_match\""
+    }
+  },
+  {
+    "timestamp": "2026-03-21T19:00:20.320Z",
+    "local_time": "22:00:20",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[22:00:20] State phase: [waiting_first_match]. First order matched [Up] for 0.39, cancelling other..."
+    }
+  },
+  {
+    "timestamp": "2026-03-21T19:00:20.321Z",
+    "local_time": "22:00:20",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[22:00:20] State phase: [first_matched]. Second cancelled, next phase: \"first_matched\"  get_positions."
+    }
+  },
+  {
+    "timestamp": "2026-03-21T19:00:20.321Z",
+    "local_time": "22:00:20",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[22:00:20] State phase: [first_matched]. Get order result:",
+      "order": {
+        "id": "17741196012349693520",
+        "status": "MATCHED",
+        "price": 0.42,
+        "size_matched": 25
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-21T19:00:20.321Z",
+    "local_time": "22:00:20",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[22:00:20] State phase: [first_matched]. Entry confirmed [Up]: 25 shares, \"@\", 0.39. Next phase: \"recalculate\""
+    }
+  },
+  {
+    "timestamp": "2026-03-21T19:00:21.323Z",
+    "local_time": "22:00:21",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[22:00:21] State phase: [first_matched]. Hedge [Down] recalculated. now_price: \"0.65\", need: 28.67 shares, \"@\", $18.63"
+    }
+  },
+  {
+    "timestamp": "2026-03-21T19:00:28.337Z",
+    "local_time": "22:00:28",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[22:00:28] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "status": "fake",
+        "success": true,
+        "orderID": "17741196223334001227",
+        "takingAmount": "",
+        "makingAmount": "",
+        "errorMsg": "fake order"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-21T19:00:30.405Z",
+    "local_time": "22:00:30",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[22:00:30] State phase: [waiting_first_hedge_fill]. Hedge orders matched. Recalculating positions..."
+    }
+  },
+  {
+    "timestamp": "2026-03-21T19:00:36.419Z",
+    "local_time": "22:00:36",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[22:00:36] Action: ",
+      "result": {
+        "S_A": 25,
+        "S_B": 28.67,
+        "I_A": 9.75,
+        "I_B": 18.922200000000004,
+        "I_total": 28.67,
+        "P_A": 0.35,
+        "P_B": 0.66,
+        "Profit_A": -3.67,
+        "Profit_A_perc": "-12.8%",
+        "Profit_B": 0,
+        "Profit_B_perc": "-0.0%",
+        "isRiskFree": false,
+        "budgetLeft": 391.33,
+        "nextTurn": "winner",
+        "action": {
+          "type": "buy",
+          "assetId": "88803217591594755901320919781934980310660759632393667509396916000967175826412",
+          "name": "Down",
+          "size": 71.69,
+          "amount": 47.32,
+          "price": 0.66,
+          "order_type": "FOK",
+          "reason": "P4 leader Down @ 0.66",
+          "sim": {
+            "S_A": 25,
+            "S_B": 100.36,
+            "I_total": 75.99,
+            "Profit_A": -50.99,
+            "Profit_B": 24.37,
+            "isRiskFree": false
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-21T19:00:59.540Z",
+    "local_time": "22:00:59",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[22:00:59] State phase: [waiting_arbitrage_fill]. All arbitrage orders matched. Recalculating positions..."
+    }
+  },
+  {
+    "timestamp": "2026-03-21T19:01:05.543Z",
+    "local_time": "22:01:05",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[22:01:05] Action: ",
+      "result": {
+        "S_A": 25,
+        "S_B": 100.36,
+        "I_A": 9.75,
+        "I_B": 64.8038,
+        "I_total": 74.55,
+        "P_A": 0.43,
+        "P_B": 0.59,
+        "Profit_A": -49.55,
+        "Profit_A_perc": "-66.5%",
+        "Profit_B": 25.81,
+        "Profit_B_perc": "34.6%",
+        "isRiskFree": false,
+        "budgetLeft": 345.45,
+        "nextTurn": "winner",
+        "action": {
+          "type": "buy",
+          "assetId": "12910218835351861500842149766907344237637394999603865446392343028160461244226",
+          "name": "Up",
+          "size": 84.99,
+          "amount": 36.55,
+          "price": 0.43,
+          "order_type": "FOK",
+          "reason": "Risk Manager: Rescue Up @ 0.43",
+          "setRiskManagerActivated": true,
+          "sim": {
+            "S_A": 109.99,
+            "S_B": 100.36,
+            "I_total": 111.1,
+            "Profit_A": -1.11,
+            "Profit_B": -10.74,
+            "isRiskFree": false
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-21T19:01:27.642Z",
+    "local_time": "22:01:27",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[22:01:27] State phase: [waiting_arbitrage_fill]. All arbitrage orders matched. Recalculating positions..."
+    }
+  }
+]

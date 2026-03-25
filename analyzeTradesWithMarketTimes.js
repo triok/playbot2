@@ -447,43 +447,43 @@ function analyzeMarketStrategy(trades) {
 /**
  * Препроцессинг для объединения шагов между которыми меньше 7 секунд
  */
-function aggregateTrades(trades, timeThreshold = 7, priceTolerance = 0.0005) {
-  if (!trades || trades.length === 0) return [];
+// function aggregateTrades(trades, timeThreshold = 7, priceTolerance = 0.0005) {
+//   if (!trades || trades.length === 0) return [];
 
-  const sorted = [...trades].sort((a, b) => a.timestamp - b.timestamp);
+//   const sorted = [...trades].sort((a, b) => a.timestamp - b.timestamp);
 
-  const result = [];
-  let current = null;
+//   const result = [];
+//   let current = null;
 
-  for (const t of sorted) {
-    if (!current) {
-      current = { ...t };
-      continue;
-    }
+//   for (const t of sorted) {
+//     if (!current) {
+//       current = { ...t };
+//       continue;
+//     }
 
-    const timeDiff = t.timestamp - current.timestamp;
-    const sameOutcome = t.outcome === current.outcome;
-    const priceClose = Math.abs(t.price - current.price) < priceTolerance;
+//     const timeDiff = t.timestamp - current.timestamp;
+//     const sameOutcome = t.outcome === current.outcome;
+//     const priceClose = Math.abs(t.price - current.price) < priceTolerance;
 
-    if (timeDiff <= timeThreshold && sameOutcome && priceClose) {
-      // объединяем
-      current.size += t.size;
-      current.usdValue += t.usdValue;
+//     if (timeDiff <= timeThreshold && sameOutcome && priceClose) {
+//       // объединяем
+//       current.size += t.size;
+//       current.usdValue += t.usdValue;
 
-      // можно усреднить цену если хочешь
-      current.price = current.usdValue / current.size;
-    } else {
-      result.push(current);
-      current = { ...t };
-    }
-  }
+//       // можно усреднить цену если хочешь
+//       current.price = current.usdValue / current.size;
+//     } else {
+//       result.push(current);
+//       current = { ...t };
+//     }
+//   }
 
-  if (current) result.push(current);
+//   if (current) result.push(current);
 
-  return result;
-}
-// Запуск анализа
-analyzeTradesWithMarketTimes().catch(console.error);
+//   return result;
+// }
+// // Запуск анализа
+// analyzeTradesWithMarketTimes().catch(console.error);
 
 
 // function findSmallTrades() {
@@ -516,3 +516,336 @@ analyzeTradesWithMarketTimes().catch(console.error);
 // }
 
 // findSmallTrades();
+
+
+// analyzeTradesWithMarketTimes().catch(console.error);
+
+
+
+
+// async function getMarketResult() {
+//   const TRADES_DIR = './data/trades';
+//   const RESOLVE_DIR = './data/trades/resolve';
+
+//   if (!fs.existsSync(RESOLVE_DIR)) {
+//     fs.mkdirSync(RESOLVE_DIR, { recursive: true });
+//   }
+
+//   const files = fs.readdirSync(TRADES_DIR).filter(f => f.endsWith('.json'));
+
+//   console.log(`\n🔎 Запрос исходов маркетов\n`);
+
+//   for (const file of files) {
+
+//     const filePath = path.join(TRADES_DIR, file);
+//     const trades = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+
+//     if (!trades.length) {
+//       console.log(`⚠️ Пустой файл: ${file}`);
+//       continue;
+//     }
+
+//     const slug = trades[0].slug;
+//     const conditionId = trades[0].conditionId;
+//     const savePath = path.join(RESOLVE_DIR, `${conditionId}.json`);
+//     if (fs.existsSync(savePath)) {
+//       console.log(`✔ Уже обработан: ${conditionId}`);
+//       continue;
+//     }
+
+//     const marketInfo = await fetchMarketInfo(slug);
+
+//     if (!marketInfo) {
+//       console.log(`⚠️ Не удалось получить информацию о рынке: ${slug}`);
+//       continue;
+//     }
+
+//     const outcomes = JSON.parse(marketInfo.outcomes);
+//     const outcomePrices = JSON.parse(marketInfo.outcomePrices);
+//     const tokenIds = JSON.parse(marketInfo.clobTokenIds);
+
+//     const winnerIndex = outcomePrices.findIndex(p => p === "1");
+
+//     if (winnerIndex === -1) {
+//       console.log(`⏳ Маркет ещё не зарезолвен: ${slug}`);
+//       continue;
+//     }
+
+//     const winnerOutcome = outcomes[winnerIndex];
+//     const winnerTokenId = tokenIds[winnerIndex];
+
+//     const resultData = {
+//       assetId: winnerTokenId,
+//       name: winnerOutcome
+//     };
+
+    
+
+//     fs.writeFileSync(savePath, JSON.stringify(resultData, null, 2));
+
+//     console.log(`📊 ${slug}`);
+//     console.log(`🏆 Победитель: ${winnerOutcome}`);
+//     console.log(`💾 Сохранено: ${savePath}\n`);
+//   }
+// }
+
+// getMarketResult();
+
+
+
+// function analyzeAllMarkets() {
+//   const TRADES_DIR = './data/trades';
+//   const RESOLVE_DIR = './data/trades/resolve';
+  
+//   // 🛑 Ограничение для тестов (сколько файлов проверять за раз)
+//   const MAX_MARKETS_TO_ANALYZE = 698; 
+
+//   if (!fs.existsSync(RESOLVE_DIR)) {
+//     console.log('❌ Папка resolve не найдена!');
+//     return;
+//   }
+
+//   // Получаем все файлы .json
+//   const allFiles = fs.readdirSync(TRADES_DIR).filter(f => 
+//     f.endsWith('.json') && !fs.statSync(path.join(TRADES_DIR, f)).isDirectory()
+//   );
+
+//   // Отрезаем только нужное количество для теста
+//   const files = allFiles.slice(0, MAX_MARKETS_TO_ANALYZE);
+
+//   console.log(`\n📊 НАЧАЛО АНАЛИЗА МАРКЕТОВ (Анализируем ${files.length} из ${allFiles.length})\n`);
+//   console.log('='.repeat(70));
+
+//   let totalOverallPnL = 0;
+
+//   for (const file of files) {
+//     const filePath = path.join(TRADES_DIR, file);
+//     const resolvePath = path.join(RESOLVE_DIR, file);
+
+//     // Проверяем, есть ли результат по этому маркету
+//     if (!fs.existsSync(resolvePath)) {
+//       console.log(`⚠️ Пропуск ${file}: нет файла с результатами (resolve)`);
+//       continue;
+//     }
+
+//     const trades = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+//     const resolveData = JSON.parse(fs.readFileSync(resolvePath, 'utf8'));
+    
+//     if (!trades || trades.length === 0) continue;
+
+//     // Сортируем трейды по времени (от старых к новым)
+//     trades.sort((a, b) => a.timestamp - b.timestamp);
+
+//     // Берем имя победителя прямо из файла resolve
+//     const winnerOutcome = resolveData.name; 
+//     const marketName = trades[0].title || file;
+    
+//     // --- ПЕРЕМЕННЫЕ СОСТОЯНИЯ ---
+//     let totalInvested = 0;
+//     let riskFreeAchieved = false;
+//     let riskFreeTime = null;
+//     const positions = {};
+
+//     // 1. Анализ первого входа
+//     const firstTrade = trades[0];
+//     const isCheapFirst = firstTrade.price < 0.50;
+//     const firstTradeDesc = `${firstTrade.outcome} по $${firstTrade.price} (${isCheapFirst ? 'Дешевый' : 'Дорогой'})`;
+
+//     for (const trade of trades) {
+//       const outcome = trade.outcome;
+//       const size = Number(trade.size);
+//       const usdValue = Number(trade.usdValue);
+//       const price = Number(trade.price);
+
+//       if (!positions[outcome]) {
+//         positions[outcome] = { shares: 0, invested: 0, tradesCount: 0, minPrice: price, maxPrice: price };
+//       }
+
+//       // Обновляем позицию (так как SELL нет, просто плюсуем)
+//       positions[outcome].shares += size;
+//       positions[outcome].invested += usdValue;
+//       positions[outcome].tradesCount += 1;
+//       positions[outcome].minPrice = Math.min(positions[outcome].minPrice, price);
+//       positions[outcome].maxPrice = Math.max(positions[outcome].maxPrice, price);
+//       totalInvested += usdValue;
+
+//       // 3. Проверка на Risk-Free в моменте
+//       const outcomesList = Object.keys(positions);
+//       if (outcomesList.length >= 2 && !riskFreeAchieved) {
+//         // Если акций на КАЖДОМ исходе больше, чем потрачено ВСЕГО денег -> Risk Free
+//         const isRF = outcomesList.every(out => positions[out].shares > totalInvested);
+//         if (isRF) {
+//           riskFreeAchieved = true;
+//           riskFreeTime = new Date(trade.timestamp * 1000).toLocaleTimeString();
+//         }
+//       }
+//     }
+
+//     // --- РАСЧЕТ ИТОГОВ ---
+//     const winningShares = positions[winnerOutcome] ? positions[winnerOutcome].shares : 0;
+//     const payout = winningShares * 1; 
+//     const pnl = payout - totalInvested;
+//     const pnlPercent = totalInvested > 0 ? (pnl / totalInvested) * 100 : 0;
+    
+//     totalOverallPnL += pnl;
+
+//     // --- ВЫВОД В КОНСОЛЬ ---
+//     console.log(`🏆 Маркет: ${marketName}`);
+//     console.log(`Файл: ${file}`);
+//     console.log(`Победитель: [${winnerOutcome}]`);
+//     console.log(`\n▶️ 1) Первый вход: Куплен исход ${firstTradeDesc}`);
+    
+//     console.log(`\n▶️ 2 & 5) Позиции и Усреднения:`);
+//     const outKeys = Object.keys(positions);
+//     for (const out of outKeys) {
+//       const data = positions[out];
+//       const avgPrice = data.invested / data.shares;
+//       const isAveraged = data.tradesCount > 1 && data.minPrice !== data.maxPrice;
+//       const avgText = isAveraged 
+//         ? `Да (от $${data.minPrice.toFixed(2)} до $${data.maxPrice.toFixed(2)})` 
+//         : `Нет (1 ордер или одна цена)`;
+
+//       console.log(`  [${out}]:`);
+//       console.log(`    - Накоплено акций: ${data.shares.toFixed(2)} шт.`);
+//       console.log(`    - Потрачено: $${data.invested.toFixed(2)}`);
+//       console.log(`    - Средняя цена (Avg): $${avgPrice.toFixed(4)}`);
+//       console.log(`    - Сетка/Усреднение: ${avgText}`);
+//     }
+
+//     // --- АНАЛИЗ БАЛАНСА ---
+//     if (outKeys.length === 2) {
+//       const shares1 = positions[outKeys[0]].shares;
+//       const shares2 = positions[outKeys[1]].shares;
+//       const diff = Math.abs(shares1 - shares2);
+//       // Считаем отношение бОльшей стороны к меньшей (напр. 1.2 означает перекос 20%)
+//       const ratio = Math.max(shares1, shares2) / (Math.min(shares1, shares2) || 1);
+      
+//       let balanceText = '';
+//       if (ratio < 1.1) balanceText = 'Идеальный баланс (разница менее 10%)';
+//       else if (ratio < 1.4) balanceText = 'Средний перекос (усреднял падающий исход)';
+//       else balanceText = '⚠️ Сильный перекос (бот сорвался в погоню за одним из исходов!)';
+      
+//       console.log(`\n  ⚖️ Баланс стратегии:`);
+//       console.log(`    - Разница в акциях: ${diff.toFixed(2)} шт.`);
+//       console.log(`    - Вердикт: ${balanceText}`);
+//     }
+
+//     console.log(`\n▶️ 3) Был ли статус Risk-Free: ${riskFreeAchieved ? `✅ ДА (достигнут в ${riskFreeTime})` : '❌ НЕТ (банк рос быстрее, чем копились акции)'}`);
+    
+//     console.log(`\n▶️ 4) ФИНАНСОВЫЙ ИТОГ (PNL):`);
+//     console.log(`    - Общие вложения: $${totalInvested.toFixed(2)}`);
+//     console.log(`    - Выплата: $${payout.toFixed(2)}`);
+//     const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`;
+//     const pnlIcon = pnl >= 0 ? '🟢' : '🔴';
+//     console.log(`    - Чистая прибыль: ${pnlIcon} ${pnlStr} (${pnlPercent.toFixed(1)}%)`);
+    
+//     console.log('='.repeat(70));
+//   }
+
+//   console.log(`\n💵 ОБЩИЙ PNL ПО ПРОАНАЛИЗИРОВАННЫМ ФАЙЛАМ: ${totalOverallPnL >= 0 ? '+' : '-'}$${Math.abs(totalOverallPnL).toFixed(2)}\n`);
+// }
+
+// // Запуск
+// analyzeAllMarkets();
+
+
+function exportMarketsToCSV() {
+  const TRADES_DIR = './data/trades';
+  const RESOLVE_DIR = './data/trades/resolve';
+  const OUTPUT_FILE = './markets_analysis.csv'; // Сюда сохранится таблица для Excel
+
+  if (!fs.existsSync(RESOLVE_DIR)) {
+    console.log('❌ Папка resolve не найдена!');
+    return;
+  }
+
+  // Получаем все файлы .json
+  const files = fs.readdirSync(TRADES_DIR).filter(f => 
+    f.endsWith('.json') && !fs.statSync(path.join(TRADES_DIR, f)).isDirectory()
+  );
+
+  console.log(`\n⚙️ НАЧАЛО ОБРАБОТКИ (Файлов: ${files.length}). Пожалуйста, подождите...\n`);
+
+  // Заголовки для Excel (используем точку с запятой ";" как разделитель колонок)
+  let csvContent = "ID Маркета;Исход первого входа;Цена первого входа;Признак Risk-Free;PnL (Сумма);PnL (%);Вложено всего\n";
+
+  let totalOverallPnL = 0;
+  let processedCount = 0;
+
+  for (const file of files) {
+    const filePath = path.join(TRADES_DIR, file);
+    const resolvePath = path.join(RESOLVE_DIR, file);
+
+    if (!fs.existsSync(resolvePath)) continue;
+
+    const trades = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const resolveData = JSON.parse(fs.readFileSync(resolvePath, 'utf8'));
+    
+    if (!trades || trades.length === 0) continue;
+
+    // Сортируем трейды по времени (от старых к новым)
+    trades.sort((a, b) => a.timestamp - b.timestamp);
+
+    const winnerOutcome = resolveData.name;
+    const marketId = file.replace('.json', ''); // Убираем .json из названия для красоты
+    
+    let totalInvested = 0;
+    let riskFreeAchieved = false;
+    const positions = {};
+
+    // 1. Первый вход
+    const firstTrade = trades[0];
+    const firstOutcome = firstTrade.outcome;
+    const firstPrice = Number(firstTrade.price);
+
+    for (const trade of trades) {
+      const outcome = trade.outcome;
+      const size = Number(trade.size);
+      const usdValue = Number(trade.usdValue);
+
+      if (!positions[outcome]) {
+        positions[outcome] = { shares: 0, invested: 0 };
+      }
+
+      positions[outcome].shares += size;
+      positions[outcome].invested += usdValue;
+      totalInvested += usdValue;
+
+      // Проверка на Risk-Free
+      const outcomesList = Object.keys(positions);
+      if (outcomesList.length >= 2 && !riskFreeAchieved) {
+        const isRF = outcomesList.every(out => positions[out].shares > totalInvested);
+        if (isRF) riskFreeAchieved = true;
+      }
+    }
+
+    // Расчет итогов
+    const winningShares = positions[winnerOutcome] ? positions[winnerOutcome].shares : 0;
+    const payout = winningShares * 1; 
+    const pnl = payout - totalInvested;
+    const pnlPercent = totalInvested > 0 ? (pnl / totalInvested) * 100 : 0;
+    
+    totalOverallPnL += pnl;
+    processedCount++;
+
+    // Форматируем данные для Excel (меняем "." на ",", чтобы Excel понимал дроби)
+    const fmtPrice = firstPrice.toFixed(2).replace('.', ',');
+    const fmtPnl = pnl.toFixed(2).replace('.', ',');
+    const fmtPnlPerc = pnlPercent.toFixed(2).replace('.', ',');
+    const fmtInvested = totalInvested.toFixed(2).replace('.', ',');
+    const rfText = riskFreeAchieved ? 'Да' : 'Нет';
+
+    // Добавляем строку в CSV
+    csvContent += `${marketId};${firstOutcome};${fmtPrice};${rfText};${fmtPnl};${fmtPnlPerc};${fmtInvested}\n`;
+  }
+
+  // Сохраняем итоговый файл
+  fs.writeFileSync(OUTPUT_FILE, csvContent, 'utf8');
+
+  console.log(`✅ ГОТОВО! Успешно обработано маркетов: ${processedCount}`);
+  console.log(`💵 Общий PnL: $${totalOverallPnL.toFixed(2)}`);
+  console.log(`📁 Файл выгружен сюда: ${path.resolve(OUTPUT_FILE)}\n`);
+}
+
+// Запуск
+exportMarketsToCSV();

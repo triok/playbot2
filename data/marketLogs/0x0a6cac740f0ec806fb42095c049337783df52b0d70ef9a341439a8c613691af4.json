@@ -1,0 +1,1046 @@
+[
+  {
+    "timestamp": "2026-03-22T02:14:10.695Z",
+    "local_time": "05:14:10",
+    "category": "polymarket_handler",
+    "data": {
+      "message": "Tick size changed to: \"0.001\""
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.355Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] Ответ от placeArbitrageOrder",
+      "success": true,
+      "orderId": "mock_order_1",
+      "price": 0.42,
+      "size": 20,
+      "orderPriceMinTickSize": "0.01"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.355Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] Ответ от placeArbitrageOrder",
+      "success": true,
+      "orderId": "mock_order_2",
+      "price": 0.42,
+      "size": 20,
+      "orderPriceMinTickSize": "0.01"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.355Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] ✅ Both initial orders placed, next phase \"waiting_first_match\""
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.355Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [waiting_first_match]. First order matched [Down] for 0.32, cancelling other..."
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.355Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Second cancelled, next phase: \"first_matched\"  get_positions."
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.355Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Get order result:",
+      "order": {
+        "status": "MATCHED",
+        "size_matched": 20,
+        "price": 0.32
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.355Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Entry confirmed [Down]: 20 shares, \"@\", 0.32. Next phase: \"recalculate\""
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.355Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.75\", need: 26.66 shares, \"@\", $19.99"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.355Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_3"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.355Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_3"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.355Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.88\", need: 58.13 shares, \"@\", $51.15"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.356Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_4"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.356Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_4"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.356Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.69\", need: 21.33 shares, \"@\", $14.72"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.356Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_5"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.356Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_5"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.356Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.88\", need: 58.13 shares, \"@\", $51.15"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.356Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_6"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.356Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_6"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.356Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.88\", need: 58.13 shares, \"@\", $51.15"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.356Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_7"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.356Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_7"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.356Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.88\", need: 58.13 shares, \"@\", $51.15"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.357Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_8"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.357Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_8"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.357Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.88\", need: 58.13 shares, \"@\", $51.15"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.357Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_9"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.357Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_9"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.357Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.89\", need: 63.94 shares, \"@\", $56.9"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.357Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_10"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.357Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_10"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.357Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.89\", need: 63.94 shares, \"@\", $56.9"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.357Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_11"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.358Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_11"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.358Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.89\", need: 63.94 shares, \"@\", $56.9"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.358Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_12"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.358Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_12"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.358Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.89\", need: 63.94 shares, \"@\", $56.9"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.358Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_13"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.358Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_13"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.358Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.89\", need: 63.94 shares, \"@\", $56.9"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.358Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_14"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.358Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_14"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.358Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.89\", need: 63.94 shares, \"@\", $56.9"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.358Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_15"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.358Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_15"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.359Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.89\", need: 63.94 shares, \"@\", $56.9"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.359Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_16"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.359Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_16"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.359Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.88\", need: 58.13 shares, \"@\", $51.15"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.359Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_17"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.359Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_17"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.359Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.89\", need: 63.94 shares, \"@\", $56.9"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.359Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_18"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.359Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_18"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.359Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.89\", need: 63.94 shares, \"@\", $56.9"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.359Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_19"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.359Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_19"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.359Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.89\", need: 63.94 shares, \"@\", $56.9"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.360Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_20"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.360Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_20"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.360Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.89\", need: 63.94 shares, \"@\", $56.9"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.360Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_21"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.360Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_21"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.360Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.95\", need: 159.6 shares, \"@\", $151.62"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.361Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_22"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.361Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_22"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.361Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.95\", need: 159.6 shares, \"@\", $151.62"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.363Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_23"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.363Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_23"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.363Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.89\", need: 63.94 shares, \"@\", $56.9"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.364Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_24"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.364Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_24"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.364Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.89\", need: 63.94 shares, \"@\", $56.9"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.364Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_25"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.364Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_25"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.364Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.82\", need: 37.63 shares, \"@\", $30.85"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.364Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_26"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.364Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_26"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.364Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.79\", need: 31.98 shares, \"@\", $25.27"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.364Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_27"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.365Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_27"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.365Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.84\", need: 42.64 shares, \"@\", $35.82"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.365Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_28"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.365Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_28"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.365Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.66\", need: 19.39 shares, \"@\", $12.8"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.365Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_29"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.365Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_29"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.365Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.89\", need: 63.94 shares, \"@\", $56.9"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.365Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_30"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.365Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_30"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.365Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.89\", need: 63.94 shares, \"@\", $56.9"
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.366Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [enter_hedge]. First hedge order result: ",
+      "result": {
+        "success": true,
+        "orderID": "mock_order_31"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.366Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge50 order canceled...",
+      "cancelHedge50": {
+        "canceled": [
+          "mock_order_31"
+        ]
+      }
+    }
+  },
+  {
+    "timestamp": "2026-03-22T11:44:56.366Z",
+    "local_time": "14:44:56",
+    "category": "autobidbot_buy",
+    "data": {
+      "message": "[14:44:56] State phase: [first_matched]. Hedge [Up] recalculated. now_price: \"0.95\", need: 159.6 shares, \"@\", $151.62"
+    }
+  }
+]

@@ -4,6 +4,7 @@ import { scanForOpportunities } from './services/polymarketService';
 import { Opportunity, LogEntry } from './types';
 import Console from './components/Console';
 import StatsCard from './components/StatsCard';
+import BacktestView from './components/BacktestView';
 import MarketInfo  from  './components/MarketInfo';
 import { PolymarketWebsocket } from "./services/polymarketWebsocket";
 import { calculateTimeLeft } from "./utils/timeUtils";
@@ -79,6 +80,8 @@ export default function App() {
   const [calcBuy, setCalcBuy] = useState("");
   const [calcSell, setCalcSell] = useState("");
   const [marketStates, setMarketStates] = useState<Record<string, any>>({});
+  const [expandedStates, setExpandedStates] = useState<Record<string, boolean>>({});
+  const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({});
   const [cryptoPrices, setCryptoPrices] = useState<Record<string, number>>({
     BTC: 0,
     ETH: 0,
@@ -538,6 +541,111 @@ export default function App() {
       }    
     });
 
+    const arbPnL: Array<{
+      marketId: string;
+      order: number | null;
+      invested: number;
+      pnl: number;
+      pnlPercent: number;
+      entryPrice: number | null;
+      resolved: string;
+    }> = [];
+    
+    Object.entries(marketStates).forEach(([marketId, state]) => {
+      if (!state.resolved || !state.positionsHistory?.length) return;
+    
+      // Первый снапшот позиций
+      const firstSnapshot = state.positionsHistory[0];
+
+      // Последний снапшот позиций
+      const lastSnapshot = state.positionsHistory[state.positionsHistory.length - 1];
+      if (!lastSnapshot?.positions?.length) return;
+    
+      // Суммируем initialValue всех позиций
+      const totalInvested = lastSnapshot.positions.reduce(
+        (sum, p) => sum + Number(p.initialValue || 0), 0
+      );
+      if (totalInvested <= 0) return;
+    
+      // Находим выигравшую позицию по state.resolved
+      const winningPos = lastSnapshot.positions.find(p => {
+        const outcomeName = (p.outcome || p.name || '').toLowerCase();
+        const resolved = (state.resolved || '').toLowerCase();
+        return outcomeName.includes(resolved) || resolved.includes(outcomeName);
+      });
+    
+      if (!winningPos) return;
+    
+      const payout = Number(winningPos.size || 0);
+      const pnl = payout - totalInvested;
+      const pnlPercent = (pnl / totalInvested) * 100;
+
+      
+
+      
+      // Средняя цена входа по первому снапшоту
+
+      const firstPos = firstSnapshot?.positions?.[0];
+
+      const entryPrice = firstPos && Number(firstPos.size) > 0
+        ? Number(firstPos.initialValue) / Number(firstPos.size)
+        : null;
+     
+      const firstPosName = firstPos && Number(firstPos.size) > 0
+      ? firstPos.outcome ?? null
+      : null;
+
+      const opp = opportunities.find(o => String(o.id) === String(marketId));
+
+      // поиск позиций с высоким риском
+
+      const bigRisk = state.positionsHistory.some(snapshot =>
+        snapshot?.positions?.some(pos => {
+          const size = Number(pos.size);
+          const initialValue = Number(pos.initialValue);
+          const currentPrice = Number(pos.currentPrice);
+      
+          if (!size || !initialValue || !currentPrice) return false;
+      
+          const currentValue = size * currentPrice;
+      
+          const pnlPercent = (currentValue - initialValue) / initialValue * 100;
+      
+          return pnlPercent <= -40;
+        })
+      );
+
+      // поиск позиций с RF
+      // ← проверяем RF: оба исхода в плюсе
+      const isRiskFree = lastSnapshot.positions.every(p => {
+        const profit = Number(p.size) - totalInvested;
+        return profit > 0;
+      }); 
+
+      const category = state.resolvedKeyword || 'unknown';
+
+      arbPnL.push({
+        marketId,
+        order: opp?.order ?? null,
+        invested: totalInvested,
+        pnl,
+        pnlPercent,
+        resolved: state.resolved,
+        entryPrice,
+        firstPosName,
+        bigRisk,
+        isRiskFree,
+        category,
+        slug: opp?.slug,
+        conditionId: opp?.conditionId
+      });
+    });
+
+    arbPnL.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+
+    const totalPnL = arbPnL.reduce((sum, m) => sum + m.pnl, 0);
+
+
     return { 
       win1, loss1, 
       win2, loss2, 
@@ -548,7 +656,9 @@ export default function App() {
       sortedEndTimeBuckets,
       arb46Win, 
       arb46Loss,
-      arb46ByCategory    
+      arb46ByCategory,
+      arbPnL,
+      totalPnL   
     };
   }, [marketStates, opportunities]);
 
@@ -864,9 +974,10 @@ export default function App() {
                   );
                 })()}
               </div>
+              
               {/* --- Bot Performance Stats --- */}
-              <div className="mt-4 text-xs font-mono space-y-1">
-                <div>
+              {/* <div className="mt-4 text-xs font-mono space-y-1"> */}
+                {/* <div>
                   <span className="text-emerald-400">✅ Outcome1 Wins:</span> {stats.win1} | 
                   <span className="text-red-400"> ❌ Losses:</span> {stats.loss1}
                 </div>
@@ -881,9 +992,9 @@ export default function App() {
                 <div>
                   <span className="text-emerald-400">✅ ARB 0.46 Wins:</span> {stats.arb46Win} | 
                   <span className="text-red-400"> ❌ Losses:</span> {stats.arb46Loss}
-                </div>  
+                </div>   */}
                 {/* --- ARB 0.46 Performance by Category --- */}
-                <div className="mt-4 text-xs font-mono">
+                {/* <div className="mt-4 text-xs font-mono">
                   <div className="font-bold mb-1">📊 ARB 0.46 by Category:</div>
                   {Object.entries(stats.arb46ByCategory).map(([category, data]) => (
                     <div key={category} className="flex justify-between">
@@ -897,16 +1008,16 @@ export default function App() {
                       </span>
                     </div>
                   ))}
-                </div>                              
-                <div className="text-slate-500">
+                </div>                               */}
+                {/* <div className="text-slate-500">
                   Total tracked markets: {Object.keys(marketStates).length}
-                </div>
-              </div>  
-              {stats.outcome1DoneCount > 0 && <div>✅ Markets with outcome1 done: {stats.outcome1DoneCount}</div>} 
-              {stats.outcome1SoldCount > 0 && <div>❌ Markets with outcome1 sold: {stats.outcome1SoldCount}</div>}   
+                </div> */}
+              {/* </div>   */}
+              {/* {stats.outcome1DoneCount > 0 && <div>✅ Markets with outcome1 done: {stats.outcome1DoneCount}</div>} 
+              {stats.outcome1SoldCount > 0 && <div>❌ Markets with outcome1 sold: {stats.outcome1SoldCount}</div>}    */}
                           
               {/* --- Статистика по категориям --- */}
-              <div className="mt-4 text-xs font-mono">
+              {/* <div className="mt-4 text-xs font-mono">
                 <div className="font-bold mb-1">📊 Performance by Category (Outcome1):</div>
                 {Object.entries(stats.byCategory).map(([category, data]) => (
                   <div key={category} className="flex justify-between">
@@ -920,10 +1031,10 @@ export default function App() {
                     </span>
                   </div>
                 ))}
-              </div>  
+              </div>   */}
 
               {/* --- Анализ по времени окончания (15-минутные интервалы) --- */}
-              <div className="mt-6 text-xs font-mono">
+              {/* <div className="mt-6 text-xs font-mono">
                 <div className="font-bold mb-2">📉 Performance by Market End Time (15-min buckets):</div>
                 <div className="space-y-1 max-h-60 overflow-y-auto">
                   {stats.sortedEndTimeBuckets.length > 0 ? (
@@ -947,7 +1058,85 @@ export default function App() {
                     <div className="text-slate-500">No resolved markets with end time</div>
                   )}
                 </div>
-              </div>                                    
+              </div>                                     */}
+              {stats.arbPnL.length > 0 && (
+                <div className="mt-4 text-xs font-mono">
+                  <div className="font-bold mb-2 text-slate-300">📊 Arbitrage PnL:</div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="text-slate-500 border-b border-slate-700">
+                          <th className="pr-2 pb-1">#</th>
+                          <th className="pr-2 pb-1">Entry</th>
+                          <th className="pr-2 pb-1">RF</th>
+                          <th className="pr-2 pb-1">Coin</th>
+                          <th className="pr-2 pb-1">Invested</th>
+                          <th className="pr-2 pb-1">PnL</th>
+                          <th className="pb-1">%</th>
+                          <th className="pb-1">(!)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stats.arbPnL.map((m, i) => (
+                          <tr key={m.marketId} className="border-b border-slate-800/50">
+                            <td className="pr-2 py-0.5 text-slate-500">
+                            <span
+                              onClick={() => {
+                                wsRef.current?.send(JSON.stringify({
+                                  type: "get_full_market_info",
+                                  conditionId: m.conditionId,
+                                  slug: m.slug
+                                }));
+                              }}
+                              className="cursor-pointer hover:text-blue-400 transition"
+                              title="Открыть Market Info"
+                            >
+                              {m.order ?? '—'}
+                            </span>
+                          </td>                            
+                            <td className="pr-2 py-0.5 text-slate-400">
+                              {m.entryPrice != null ? m.entryPrice.toFixed(3) : '—'}
+                            </td>
+                            <td className="pr-2 py-0.5 text-slate-400">
+                              {m.isRiskFree && (
+                                <span className="inline-block w-2 h-2 rounded-full bg-green-500"></span>
+                              )}
+                            </td>                            
+                            <td className="pr-2 py-0.5 text-slate-400 truncate max-w-[60px]">
+                              {m.category}
+                            </td>
+                            <td className="pr-2 py-0.5 text-slate-300">
+                              ${m.invested.toFixed(2)}
+                            </td>
+                            <td className={`pr-2 py-0.5 font-bold ${m.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {m.pnl >= 0 ? '+' : ''}{m.pnl.toFixed(2)}$
+                            </td>
+                            <td className={`py-0.5 ${m.pnlPercent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {m.pnlPercent >= 0 ? '+' : ''}{m.pnlPercent.toFixed(1)}%
+                            </td>
+                            <td className="py-0.5 text-center">
+                              {m.bigRisk && (
+                                <span className="inline-block w-2 h-2 rounded-full bg-red-500"></span>
+                              )}
+                            </td>                            
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="border-t border-slate-600">
+                          <td colSpan={3} className="pt-1 text-slate-400 font-bold">TOTAL</td>
+                          <td className={`pt-1 font-bold text-base ${stats.totalPnL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {stats.totalPnL >= 0 ? '+' : ''}{stats.totalPnL.toFixed(2)}$
+                          </td>
+                          <td className={`pt-1 text-slate-500 text-xs`}>
+                            {stats.arbPnL.length} trades
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              )}              
             </div>
           </div>
 
@@ -1202,24 +1391,71 @@ export default function App() {
 
                                   
                   </div>
-                  <div className="text-xs font-mono mt-1 text-yellow-400">
-                    {(autoBidStatus[String(opp.id)] || []).map((msg, i) => (
-                      <div key={i}>{msg}</div>
-                    ))}
+                  <div className="text-xs font-mono mt-1">
+                    {(autoBidStatus[String(opp.id)] || []).length > 0 && (
+                      <>
+                        {/* Последнее сообщение всегда видно */}
+                        <div className="text-yellow-400">
+                          {(autoBidStatus[String(opp.id)] || []).slice(-2)[0]}
+                        </div>                        
+                        <div className="text-yellow-400">
+                          {(autoBidStatus[String(opp.id)] || []).slice(-1)[0]}
+                        </div>
+
+                        {/* Остальные — под кнопкой */}
+                        {(autoBidStatus[String(opp.id)] || []).length > 1 && (
+                          <>
+                            <button
+                              onClick={() => setExpandedLogs(prev => ({
+                                ...prev,
+                                [opp.id]: !prev[opp.id]
+                              }))}
+                              className="text-slate-600 hover:text-slate-400 mt-0.5"
+                            >
+                              {expandedLogs[opp.id]
+                                ? '▲ скрыть'
+                                : `▼ ещё ${(autoBidStatus[String(opp.id)] || []).length - 1}`}
+                            </button>
+
+                            {expandedLogs[opp.id] && (
+                              <div className="text-yellow-400 mt-1">
+                                {(autoBidStatus[String(opp.id)] || []).slice(0, -1).map((msg, i) => (
+                                  <div key={i}>{msg}</div>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </>
+                    )}
                   </div>
                   {/* --- DEBUG: market state --- */}
                   {marketStates[opp.id] && (
-                    <pre className="text-xs text-slate-400 bg-slate-900/50 p-2 rounded mt-1 overflow-x-auto">
-                      {JSON.stringify(marketStates[opp.id], null, 2)}
-                    </pre>
-                  )}                                  
+                    <div className="mt-1">
+                      <button
+                        onClick={() => setExpandedStates(prev => ({ ...prev, [opp.id]: !prev[opp.id] }))}
+                        className="text-xs text-slate-500 hover:text-slate-300"
+                      >
+                        {expandedStates[opp.id] ? '▲ hide state' : '▼ show state'}
+                      </button>
+                      {expandedStates[opp.id] && (
+                        <pre className="text-xs text-slate-400 bg-slate-900/50 p-2 rounded mt-1 overflow-x-auto">
+                          {JSON.stringify(marketStates[opp.id], null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  )}                              
                 </div>
               ))
             )}
           </div>
         </div>
-      </main>
 
+       
+      </main>
+      <hr />
+        <h1>Бэктест Лаборатория</h1>
+        <BacktestView /> 
       {/* Модальное окно с информацией о рынке */}
       {marketInfoModal && (
         <MarketInfo 

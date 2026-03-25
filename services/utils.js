@@ -147,12 +147,12 @@ export function getTickSizeForOrder(opp, asset_id) {
   const assetSize = opp.assetTickSizes?.[asset_id]?.tickSize;
   
   if (assetSize) {
-    console.log(`[TICK] Using tickSize ${assetSize} for ${asset_id}`);
+    // console.log(`[TICK] Using tickSize ${assetSize} for ${asset_id}`);
     return assetSize;
   }
   
   // Фолбэк на общее значение
-  console.log(`[TICK] Using default tickSize ${opp.orderPriceMinTickSize}`);
+  // console.log(`[TICK] Using default tickSize ${opp.orderPriceMinTickSize}`);
   return opp.orderPriceMinTickSize;
 }
 
