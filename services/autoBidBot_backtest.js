@@ -25,12 +25,27 @@ export function createAutoBidBot({ onSignal, client, placeArbitrageOrder, cancel
 
     const ENTRY_PRICE              = config.entry_price              ?? 0.42;
     const ENTRY_BID_SIZE           = config.entry_bid_size           ?? 10;
-    const HEDGE50_PROFIT_PERCENT   = config.hedge50_profit           ?? 0.11;
+    const HEDGE50_PROFIT_PERCENT   = config.hedge50_profit           ?? 0.05;
     const PROFIT_PERCENT           = config.rf_profit                ?? 0.10;
-    const ARBITRAGE_PROFIT_PERCENT = config.arbitrage_profit         ?? 0.25;
-    const BUDGET_LIMIT             = config.budget_limit             ?? 60;
+    const ARBITRAGE_PROFIT_PERCENT = config.arbitrage_profit         ?? 0.35;
+    const BUDGET_LIMIT             = config.budget_limit             ?? 105;
     const RISK_THRESHOLD           = config.risk_threshold           ?? -0.50;
     const TARGET_LOSS              = config.target_loss              ?? -0.08;    
+
+  //   const currentConfig = {
+  //     "Entry Price ($)": ENTRY_PRICE,
+  //     "Entry Bid Size": ENTRY_BID_SIZE,
+  //     "Hedge 50% Profit (%)": `${(HEDGE50_PROFIT_PERCENT * 100).toFixed(0)}%`,
+  //     "RF Profit (%)": `${(PROFIT_PERCENT * 100).toFixed(0)}%`,
+  //     "Arb Profit (%)": `${(ARBITRAGE_PROFIT_PERCENT * 100).toFixed(0)}%`,
+  //     "Budget Limit ($)": BUDGET_LIMIT,
+  //     "Risk Threshold (%)": `${(RISK_THRESHOLD * 100).toFixed(0)}%`,
+  //     "Target Loss (%)": `${(TARGET_LOSS * 100).toFixed(0)}%`
+  // };
+  
+  // console.log("\n⚙️ ТЕКУЩИЕ НАСТРОЙКИ СТРАТЕГИИ:");
+  // console.table(currentConfig);
+
 
     let timer = null;
     const state = new Map();      // marketId → stage ('idle', 'tracking', 'armed', 'bidding')
@@ -489,12 +504,13 @@ export function createAutoBidBot({ onSignal, client, placeArbitrageOrder, cancel
       
         try {
           // тест -->
+          let order;
           if (arbitrageTestFlag) {
             let test_order_number = "0x97c2187fcd688bca5fe6fe74fd5102834b03a8980c338925f8e9b01933658149";
-            const order = await getOrderFn(test_order_number, client);
+            order = await getOrderFn(test_order_number, client);
             // <-- тест
           } else {
-            const order = await getOrderFn(state.orderToCancel, client);
+            order = await getOrderFn(state.orderToCancel, client);
           }
           
           

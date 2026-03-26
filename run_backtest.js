@@ -2,6 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import { createAutoBidBot } from './services/autoBidBot_backtest.js'; 
 
+let test_type = '1 progon';
+// let test_type = 'vse progoni';
+
 // ✅ Глобальные стейты импортировать не нужно, бот сам их отдаст через метод getBotState
 import { getMarket } from './services/getMarket.js';
 import { getClobClient } from './services/clobClient.js';
@@ -230,171 +233,55 @@ function printStatusTable(marketId) {
 
 // --- ФУНКЦИЯ ПРОГОНА ОДНОГО МАРКЕТА ---
 //   вариант для вывода на фронт
-// async function runSingleBacktest(marketId, realClient) {
-//     TEST_MARKET_ID_CURRENT = marketId;
-//     mockOrders = {};
-//     orderCounter = 1;
-//     outcomeNames = {};
-//     const history = []; 
-//     let lastAction = null; 
-  
-//     marketStates.delete(marketId);
-  
-//     try {
-//       const marketInfo = await getMarket(marketId, realClient);
-//       const title = marketInfo.question || "";
-//       const keyword = CRYPTO_KEYWORDS.find(k => title.toLowerCase().includes(k.toLowerCase()));
-      
-//       if (!keyword) {
-//         console.log(`⏩ Пропуск ${marketId}: keyword не найден`);
-//         fs.unlinkSync(path.join(LOGS_DIR, `${marketId}.jsonl`));
-//         return null; 
-//       }
-  
-//       marketInfo.tokens.forEach(t => outcomeNames[t.token_id] = t.outcome);
-//       const resolvedWinner = marketInfo.tokens.find(t => t.winner)?.outcome;
-      
-//       testBot.onSignal = (s) => { 
-//         // ✅ ФИЛЬТР: Игнорируем логи ожидания, чтобы не засорять историю
-//         if (s.type === 'bidding' && !s.text.includes('Ждём') && !s.text.includes('waiting')) {
-//           lastAction = s.text; 
-//         }
-//       };
-  
-//       const filePath = path.join(LOGS_DIR, `${marketId}.jsonl`);
-//       const allLines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
-//       const metaRow = allLines.find(l => l.meta);
-//       const clobIdFromFile = metaRow?.id || null;
-//       const ticksData = allLines.filter(l => !l.meta).sort((a, b) => a.ts - b.ts);
-  
-//       let opp = null;
-//       for (const tickData of ticksData) {
-//         global.VIRTUAL_TIME = tickData.ts;
-//         lastAction = null; 
-  
-//         if (!opp) {
-//           opp = {
-//             id: marketId, conditionId: marketId, arbitrage: true, marketType: '15M',
-//             rawEndDate: new Date(tickData.ts + 15 * 60 * 1000).toISOString(),
-//             outcomes: tickData.outcomes.map(o => ({
-//               assetId: o.assetId, name: outcomeNames[o.assetId], price: o.price, size: o.size, best_ask: o.ask, best_bid: o.bid
-//             }))
-//           };
-//         } else {
-//           opp.outcomes = opp.outcomes.map(o => {
-//             const nd = tickData.outcomes.find(item => item.assetId === o.assetId);
-//             return nd ? { ...o, price: nd.price, size: nd.size, best_ask: nd.ask, best_bid: nd.bid } : o;
-//           });
-//         }
-  
-//         const matchText = processMockMatching(opp.outcomes, marketId, testBot);
-//         // console.log(`[TICK] before tick, tickIndex=${ticksData.indexOf(tickData)}, ts=${tickData.ts}`);
-//         await testBot.tick([opp]);
-//         // console.log(`[TICK] after tick`);
-        
-//         // ✅ ЗАПИСЫВАЕМ ТОЛЬКО РЕАЛЬНЫЕ ДЕЙСТВИЯ
-//         if (lastAction || matchText) {
-//           const currentPos = await mockGetUserPositionsFn(opp.outcomes);
 
-//           history.push({
-//             t: new Date(global.VIRTUAL_TIME).toLocaleTimeString(),
-//             pA: opp.outcomes[0]?.price || 0,
-//             pB: opp.outcomes[1]?.price || 0,
-//             act: (matchText ? `[БИРЖА] ${matchText} | ` : "") + (lastAction || ""),
-//             snapshot: currentPos
-//           });
-//         }        
-//       }
-  
-//       const finalPos = await mockGetUserPositionsFn(opp?.outcomes || []);
-//       const totalInvested = finalPos.reduce((sum, p) => sum + p.initialValue, 0);
-      
-//       if (totalInvested === 0) return null; // Не входили в сделку — не пишем в отчет
-  
-//       const winPos = finalPos.find(p => p.outcome === resolvedWinner);
-//       const payout = winPos ? winPos.size : 0;
-//       const pnl = payout - totalInvested;
-  
-//       return { 
-//         marketId, 
-//         clobId: clobIdFromFile || marketInfo.id,
-//         title: title, 
-//         totalInvested, 
-//         pnl, 
-//         winner: resolvedWinner, 
-//         history 
-//       };
-  
-//     } catch (e) { 
-//       console.log(`❌ Ошибка маркета ${marketId}: ${e.message}`);
-//       return null; 
-//     }
-//   }
-  
-// вариант для перебора:
-async function runSingleBacktest(marketId, realClient, config, marketInfoCache, currentBot) {
+  async function runSingleBacktestOdin(marketId, realClient, botInstance) {
     TEST_MARKET_ID_CURRENT = marketId;
     mockOrders = {};
     orderCounter = 1;
     outcomeNames = {};
+    const history = []; 
+    let lastAction = null; 
   
     marketStates.delete(marketId);
 
-    // testBot = createAutoBidBot({
-    //     client: {},
-    //     placeArbitrageOrder: mockPlaceArbitrageOrder,
-    //     cancelOrderFn: mockCancelOrderFn,
-    //     getOrderFn: mockGetOrderFn,
-    //     getUserPositionsFn: mockGetUserPositionsFn,
-    //     onSignal: (s) => {},
-    //     config  // ← передаём параметры
-    //   });  
+    // Настраиваем логирование сигналов для этого конкретного экземпляра
+    botInstance.onSignal = (s) => { 
+      if (s.type === 'bidding' && !s.text.includes('Ждём') && !s.text.includes('waiting')) {
+          lastAction = s.text; 
+      }
+    };
 
     try {
-        if (!marketInfoCache[marketId]) {
-            marketInfoCache[marketId] = await getMarket(marketId, realClient);
-        }        
-      const marketInfo = marketInfoCache[marketId];
+      const marketInfo = await getMarket(marketId, realClient);
       const title = marketInfo.question || "";
       const keyword = CRYPTO_KEYWORDS.find(k => title.toLowerCase().includes(k.toLowerCase()));
       
       if (!keyword) {
-        // console.log(`⏩ Пропуск ${marketId}: keyword не найден`);
+        console.log(`⏩ Пропуск ${marketId}: keyword не найден`);
+        fs.unlinkSync(path.join(LOGS_DIR, `${marketId}.jsonl`));
         return null; 
       }
   
       marketInfo.tokens.forEach(t => outcomeNames[t.token_id] = t.outcome);
       const resolvedWinner = marketInfo.tokens.find(t => t.winner)?.outcome;
       
+      testBot.onSignal = (s) => { 
+        // ✅ ФИЛЬТР: Игнорируем логи ожидания, чтобы не засорять историю
+        if (s.type === 'bidding' && !s.text.includes('Ждём') && !s.text.includes('waiting')) {
+          lastAction = s.text; 
+        }
+      };
   
       const filePath = path.join(LOGS_DIR, `${marketId}.jsonl`);
-    //   const allLines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
-
-    if (!ticksCache[marketId]) {
-        const filePath = path.join(LOGS_DIR, `${marketId}.jsonl`);
-        const allLines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
-        const metaRow = allLines.find(l => l.meta);
-        ticksCache[marketId] = {
-            clobId: metaRow?.id || null,
-            ticks: allLines.filter(l => !l.meta).sort((a, b) => a.ts - b.ts)
-        };
-    }
-    
-
-    // const allLines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
-    // const metaRow = allLines.find(l => l.meta);
-    // const clobIdFromFile = metaRow?.id || null;
-    // const ticksData = allLines.filter(l => !l.meta).sort((a, b) => a.ts - b.ts);
-    
-    const cachedData = ticksCache[marketId];
-    const clobIdFromFile = cachedData.clobId;
-    const ticksData = cachedData.ticks;
-
+      const allLines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+      const metaRow = allLines.find(l => l.meta);
+      const clobIdFromFile = metaRow?.id || null;
+      const ticksData = allLines.filter(l => !l.meta).sort((a, b) => a.ts - b.ts);
   
       let opp = null;
       for (const tickData of ticksData) {
         global.VIRTUAL_TIME = tickData.ts;
-
+        lastAction = null; 
   
         if (!opp) {
           opp = {
@@ -411,12 +298,23 @@ async function runSingleBacktest(marketId, realClient, config, marketInfoCache, 
           });
         }
   
-        const matchText = processMockMatching(opp.outcomes, marketId, testBot);
+        const matchText = processMockMatching(opp.outcomes, marketId, botInstance);
         // console.log(`[TICK] before tick, tickIndex=${ticksData.indexOf(tickData)}, ts=${tickData.ts}`);
-        await testBot.tick([opp]);
+        await botInstance.tick([opp]);
         // console.log(`[TICK] after tick`);
         
-    
+        // ✅ ЗАПИСЫВАЕМ ТОЛЬКО РЕАЛЬНЫЕ ДЕЙСТВИЯ
+        if (lastAction || matchText) {
+          const currentPos = await mockGetUserPositionsFn(opp.outcomes);
+
+          history.push({
+            t: new Date(global.VIRTUAL_TIME).toLocaleTimeString(),
+            pA: opp.outcomes[0]?.price || 0,
+            pB: opp.outcomes[1]?.price || 0,
+            act: (matchText ? `[БИРЖА] ${matchText} | ` : "") + (lastAction || ""),
+            snapshot: currentPos
+          });
+        }        
       }
   
       const finalPos = await mockGetUserPositionsFn(opp?.outcomes || []);
@@ -427,12 +325,15 @@ async function runSingleBacktest(marketId, realClient, config, marketInfoCache, 
       const winPos = finalPos.find(p => p.outcome === resolvedWinner);
       const payout = winPos ? winPos.size : 0;
       const pnl = payout - totalInvested;
-      marketStates.delete(marketId); 
+  
       return { 
         marketId, 
+        clobId: clobIdFromFile || marketInfo.id,
+        title: title, 
         totalInvested, 
         pnl, 
-        winner: resolvedWinner
+        winner: resolvedWinner, 
+        history 
       };
   
     } catch (e) { 
@@ -441,80 +342,316 @@ async function runSingleBacktest(marketId, realClient, config, marketInfoCache, 
     }
   }
 
+
+// вариант для перебора:
+  async function runSingleBacktestVse(marketId, realClient, config, marketInfoCache, currentBot) {
+      TEST_MARKET_ID_CURRENT = marketId;
+      mockOrders = {};
+      orderCounter = 1;
+      outcomeNames = {};
+      const history = []; 
+      let lastAction = null;     
+      marketStates.delete(marketId);
+
+      // testBot = createAutoBidBot({
+      //     client: {},
+      //     placeArbitrageOrder: mockPlaceArbitrageOrder,
+      //     cancelOrderFn: mockCancelOrderFn,
+      //     getOrderFn: mockGetOrderFn,
+      //     getUserPositionsFn: mockGetUserPositionsFn,
+      //     onSignal: (s) => {},
+      //     config  // ← передаём параметры
+      //   });  
+
+      try {
+          if (!marketInfoCache[marketId]) {
+              marketInfoCache[marketId] = await getMarket(marketId, realClient);
+          }        
+          const marketInfo = marketInfoCache[marketId];
+          const title = marketInfo.question || "";
+          const keyword = CRYPTO_KEYWORDS.find(k => title.toLowerCase().includes(k.toLowerCase()));
+          
+          if (!keyword) {
+            // console.log(`⏩ Пропуск ${marketId}: keyword не найден`);
+            return null; 
+          }
+      
+          marketInfo.tokens.forEach(t => outcomeNames[t.token_id] = t.outcome);
+          const resolvedWinner = marketInfo.tokens.find(t => t.winner)?.outcome;
+          
+      
+          // const filePath = path.join(LOGS_DIR, `${marketId}.jsonl`);
+
+        if (!ticksCache[marketId]) {
+            const filePath = path.join(LOGS_DIR, `${marketId}.jsonl`);
+            const allLines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+            const metaRow = allLines.find(l => l.meta);
+            ticksCache[marketId] = {
+                clobId: metaRow?.id || null,
+                ticks: allLines.filter(l => !l.meta).sort((a, b) => a.ts - b.ts)
+            };
+        }
+      
+
+
+
+      // const allLines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+      // const metaRow = allLines.find(l => l.meta);
+      // const clobIdFromFile = metaRow?.id || null;
+      // const ticksData = allLines.filter(l => !l.meta).sort((a, b) => a.ts - b.ts);
+      
+      const cachedData = ticksCache[marketId];
+      const clobIdFromFile = cachedData.clobId;
+      const ticksData = cachedData.ticks;
+
+        let opp = null;
+        for (const tickData of ticksData) {
+          global.VIRTUAL_TIME = tickData.ts;
+
+    
+          if (!opp) {
+            opp = {
+              id: marketId, conditionId: marketId, arbitrage: true, marketType: '15M',
+              rawEndDate: new Date(tickData.ts + 15 * 60 * 1000).toISOString(),
+              outcomes: tickData.outcomes.map(o => ({
+                assetId: o.assetId, name: outcomeNames[o.assetId], price: o.price, size: o.size, best_ask: o.ask, best_bid: o.bid
+              }))
+            };
+          } else {
+            opp.outcomes = opp.outcomes.map(o => {
+              const nd = tickData.outcomes.find(item => item.assetId === o.assetId);
+              return nd ? { ...o, price: nd.price, size: nd.size, best_ask: nd.ask, best_bid: nd.bid } : o;
+            });
+          }
+    
+          const matchText = processMockMatching(opp.outcomes, marketId, currentBot);
+          // console.log(`[TICK] before tick, tickIndex=${ticksData.indexOf(tickData)}, ts=${tickData.ts}`);
+          await currentBot.tick([opp]);
+          // console.log(`[TICK] after tick`);
+  
+          // ✅ ЗАПИСЫВАЕМ ТОЛЬКО РЕАЛЬНЫЕ ДЕЙСТВИЯ
+          if (lastAction || matchText) {
+            const currentPos = await mockGetUserPositionsFn(opp.outcomes);
+
+            // history.push({
+            //   t: new Date(global.VIRTUAL_TIME).toLocaleTimeString(),
+            //   pA: opp.outcomes[0]?.price || 0,
+            //   pB: opp.outcomes[1]?.price || 0,
+            //   act: (matchText ? `[БИРЖА] ${matchText} | ` : "") + (lastAction || ""),
+            //   snapshot: currentPos
+            // });
+          }   
+          
+          
+      
+        }
+      
+
+        const finalPos = await mockGetUserPositionsFn(opp?.outcomes || []);
+        const totalInvested = finalPos.reduce((sum, p) => sum + p.initialValue, 0);
+        
+        if (totalInvested === 0) return null; // Не входили в сделку — не пишем в отчет
+    
+        const winPos = finalPos.find(p => p.outcome === resolvedWinner);
+        const payout = winPos ? winPos.size : 0;
+        const pnl = payout - totalInvested;
+        marketStates.delete(marketId); 
+        return { 
+          marketId, 
+          totalInvested, 
+          pnl, 
+          winner: resolvedWinner
+        };
+    
+      } catch (e) { 
+        console.log(`❌ Ошибка маркета ${marketId}: ${e.message}`);
+        return null; 
+      }
+    }
+
+
   // --- ГЛАВНЫЙ ЗАПУСКАТЕЛЬ ---
 //   вариант для вывода на фронт
-//   async function main() {
-//     const allFiles = fs.readdirSync(LOGS_DIR).filter(f => f.endsWith('.jsonl'));
-//     const files = allFiles
-//   .sort((a, b) => fs.statSync(path.join(LOGS_DIR, a)).mtimeMs - fs.statSync(path.join(LOGS_DIR, b)).mtimeMs)
-//   .slice(0, MAX_MARKETS);
+if(test_type == '1 progon'){
+  async function main() {
+    const allFiles = fs.readdirSync(LOGS_DIR).filter(f => f.endsWith('.jsonl'));
+    const files = allFiles
+  .sort((a, b) => fs.statSync(path.join(LOGS_DIR, a)).mtimeMs - fs.statSync(path.join(LOGS_DIR, b)).mtimeMs)
+  .slice(0, MAX_MARKETS);
     
-//     console.log(`🚀 ЗАПУСК БЭКТЕСТА (${files.length} маркетов)\n`);
+    console.log(`🚀 ЗАПУСК БЭКТЕСТА (${files.length} маркетов)\n`);
   
-//     const realClient = await getClobClient();
+    const realClient = await getClobClient();
     
-//     // Инициализируем бота один раз
-//     testBot = createAutoBidBot({
-//       client: {}, 
-//       placeArbitrageOrder: mockPlaceArbitrageOrder,
-//       cancelOrderFn: mockCancelOrderFn, 
-//       getOrderFn: mockGetOrderFn,
-//       getUserPositionsFn: mockGetUserPositionsFn, 
-//       onSignal: (s) => {} // Будет переопределено внутри runSingleBacktest
-//     });
+    // Инициализируем бота один раз
+    // testBot = createAutoBidBot({
+    //   client: {}, 
+    //   placeArbitrageOrder: mockPlaceArbitrageOrder,
+    //   cancelOrderFn: mockCancelOrderFn, 
+    //   getOrderFn: mockGetOrderFn,
+    //   getUserPositionsFn: mockGetUserPositionsFn, 
+    //   onSignal: (s) => {} // Будет переопределено внутри runSingleBacktest
+    // });
   
-//     const finalReport = []; // Для консольной таблицы
-//     const frontendData = {
-//       summary: { totalPnL: 0, totalInvested: 0, wins: 0, losses: 0 },
-//       markets: [] // Подробные данные для React
-//     };
+    const finalReport = []; // Для консольной таблицы
+    const frontendData = {
+      summary: { totalPnL: 0, totalInvested: 0, wins: 0, losses: 0 },
+      markets: [] // Подробные данные для React
+    };
   
-//     for (let i = 0; i < files.length; i++) {
-//       const marketId = files[i].replace('.jsonl', '');
-//       console.log(`\n💎 Обработка маркета #${i+1}: ${marketId}`);
+    for (let i = 0; i < files.length; i++) {
+      const marketId = files[i].replace('.jsonl', '');
+      console.log(`\n💎 Обработка маркета #${i+1}: ${marketId}`);
+
+        // ✅ СОЗДАЕМ бота ЗАНОВО для каждого рынка
+        // Здесь вы можете жестко прописать конфиг, чтобы он не отличался от "прогонных"
+      const currentConfig = {
+          entry_price: 0.42,
+          entry_bid_size: 10,
+          hedge50_profit: 0.11,
+          rf_profit: 0.15,
+          arbitrage_profit: 0.20,
+          budget_limit: 105,
+          risk_threshold: -0.30,
+          target_loss: -0.05
+      };      
+
+      const currentBot = createAutoBidBot({
+        client: {}, 
+        placeArbitrageOrder: mockPlaceArbitrageOrder,
+        cancelOrderFn: mockCancelOrderFn, 
+        getOrderFn: mockGetOrderFn,
+        getUserPositionsFn: mockGetUserPositionsFn,
+        config: currentConfig // Передаем конфиг явно!
+      });
+
+      // Синхронизируем глобальную переменную, чтобы вспомогательные функции её видели
+      testBot = currentBot; 
+
+      const result = await runSingleBacktestOdin(marketId, realClient, currentBot);
       
-//       const result = await runSingleBacktest(marketId, realClient);
-      
-//       if (result) {
-//         // Данные для консоли
-//         finalReport.push({
-//           "№": i + 1,
-//           "Market ID": marketId.substring(0, 10) + '...',
-//           "Результат": result.pnl >= 0 ? "✅ ВЫИГРЫШ" : "🔴 ПРОИГРЫШ",
-//           "Invested ($)": result.totalInvested.toFixed(2),
-//           "PnL ($)": (result.pnl >= 0 ? '+' : '') + result.pnl.toFixed(2),
-//           "PnL (%)": (result.totalInvested > 0 ? (result.pnl / result.totalInvested * 100).toFixed(2) : 0) + "%"
-//         });
+      if (result) {
+        // Данные для консоли
+        finalReport.push({
+          "№": i + 1,
+          "Market ID": marketId.substring(0, 10) + '...',
+          "Результат": result.pnl >= 0 ? "✅ ВЫИГРЫШ" : "🔴 ПРОИГРЫШ",
+          "Invested ($)": result.totalInvested.toFixed(2),
+          "PnL ($)": (result.pnl >= 0 ? '+' : '') + result.pnl.toFixed(2),
+          "PnL (%)": (result.totalInvested > 0 ? (result.pnl / result.totalInvested * 100).toFixed(2) : 0) + "%"
+        });
   
-//         // 🟢 ДАННЫЕ ДЛЯ ФРОНТЕНДА
-//         frontendData.markets.push(result);
-//         frontendData.summary.totalPnL += result.pnl;
-//         frontendData.summary.totalInvested += result.totalInvested;
-//         if (result.pnl > 0) frontendData.summary.wins++; else frontendData.summary.losses++;
-//       }
-//     }
+        // 🟢 ДАННЫЕ ДЛЯ ФРОНТЕНДА
+        frontendData.markets.push(result);
+        frontendData.summary.totalPnL += result.pnl;
+        frontendData.summary.totalInvested += result.totalInvested;
+        if (result.pnl > 0) frontendData.summary.wins++; else frontendData.summary.losses++;
+      }
+      testBot = null; 
+      if (global.gc) global.gc(); // Принудительный вызов GC (если запущен с флагом)      
+    }
   
-//     // 🟢 ЗАПИСЬ ФАЙЛА (В папку public твоего React-проекта)
-//     // Убедись, что путь корректный относительно того, где ты запускаешь скрипт
-//     const outputPath = './public/backtest_result.json';
-//     fs.writeFileSync(outputPath, JSON.stringify(frontendData, null, 2));
-//     console.log(`\n✅ Файл отчета создан: ${outputPath}`);
+    // 🟢 ЗАПИСЬ ФАЙЛА (В папку public твоего React-проекта)
+    // Убедись, что путь корректный относительно того, где ты запускаешь скрипт
+    const outputPath = './public/backtest_result.json';
+    fs.writeFileSync(outputPath, JSON.stringify(frontendData, null, 2));
+    console.log(`\n✅ Файл отчета создан: ${outputPath}`);
   
-//     console.log(`\n\n================================================================================`);
-//     console.log(`🏁 ФИНАЛЬНЫЙ ОТЧЕТ ПО ВСЕМ МАРКЕТАМ:`);
-//     console.table(finalReport);
-//     console.log(`================================================================================\n`);
-  
-//     process.exit(0);
-//   }
-  
+    // console.log(`\n\n================================================================================`);
+    // console.log(`🏁 ФИНАЛЬНЫЙ ОТЧЕТ ПО ВСЕМ МАРКЕТАМ:`);
+    // console.table(finalReport);
+    // console.log(`================================================================================\n`);
+    console.log(`\n\n================================================================================`);
+    console.log(`🏁 ФИНАЛЬНЫЙ ОТЧЕТ ПО ВСЕМ МАРКЕТАМ:`);
+    console.table(finalReport);
+    console.log(`================================================================================`);
+
+    // --- НОВЫЙ БЛОК ИТОГОВ ---
+    const summary = frontendData.summary;
+    const totalMarkets = summary.wins + summary.losses;
+    const winRate = totalMarkets > 0 ? (summary.wins / totalMarkets * 100).toFixed(2) : 0;
+    const totalRoi = summary.totalInvested > 0 ? (summary.totalPnL / summary.totalInvested * 100).toFixed(2) : 0;
+
+    console.log(`📊 СВОДНАЯ СТАТИСТИКА:`);
+    console.log(`✅ Выигрышей:      ${summary.wins}`);
+    console.log(`🔴 Проигрышей:     ${summary.losses}`);
+    console.log(`📈 Процент побед:  ${winRate}%`);
+    console.log(`--------------------------------------------------------------------------------`);
+    console.log(`💰 Итоговый PnL:   ${summary.totalPnL >= 0 ? '🟢 +' : '🔴 '}$${summary.totalPnL.toFixed(2)}`);
+    console.log(`💸 Всего вложено:  $${summary.totalInvested.toFixed(2)}`);
+    console.log(`🚀 Общий ROI:      ${totalRoi >= 0 ? '🟢' : '🔴'} ${totalRoi}%`);
+    console.log(`================================================================================\n`);
+    // -------------------------
+
+    // ─── CSV ЭКСПОРТ ───────────────────────────────────────────────────
+    const csvRows = [];
+
+    // Функция для превращения точки в запятую, чтобы Excel понял, что это число
+    function toExcelNum(value) {
+      if (value === undefined || value === null) return '';
+      // Превращаем в строку и меняем точку на запятую
+      return value.toString().replace('.', ',');
+    }
+
+    // Заголовок
+    csvRows.push([
+      'Market ID',
+      'Result',
+      'Invested ($)',
+      'PnL ($)',
+      'PnL (%)',
+      'Win',
+      'Loss'
+    ].join(';'));
+
+    // Строки по каждому маркету
+    for (const market of frontendData.markets) {
+      const pnlPct = market.totalInvested > 0
+        ? (market.pnl / market.totalInvested * 100).toFixed(2)
+        : '0.00';
+      const isWin  = market.pnl > 0;
+
+      csvRows.push([
+        market.marketId ?? 'unknown',          // ← поправь если поле называется иначе
+        isWin ? 'WIN' : 'LOSS',
+        toExcelNum(market.totalInvested.toFixed(2)),
+        toExcelNum(market.pnl.toFixed(2)),
+        toExcelNum(pnlPct),
+        isWin ? 1 : 0,
+        isWin ? 0 : 1
+      ].join(';'));
+    }
+
+    // Итоговая строка SUMMARY
+
+    csvRows.push(''); // пустая строка-разделитель
+    csvRows.push([
+      'TOTAL',
+      `Win rate: ${winRate}%`,
+      summary.totalInvested.toFixed(2),
+      summary.totalPnL.toFixed(2),
+      `${totalRoi}%`,
+      summary.wins,
+      summary.losses
+    ].join(';'));
+
+    // Запись файла
+    const csvPath = './public/backtest_result.csv';
+    fs.writeFileSync(csvPath, csvRows.join('\n'), 'utf8');
+    console.log(`✅ CSV отчет создан: ${csvPath}`);
+    // ───────────────────────────────────────────────────────────────────
+
+    process.exit(0);
+  }
+  main();
+} else {
 // вариант для перебора:
   async function main() {
     let topResults = []; 
     
     const RUN_PART = parseInt(process.argv[2]) || 1;
     // const RUN_PART = 1;
-    const TOTAL_PARTS = 15;
+    const TOTAL_PARTS = 1;
 
     const outputPath = `./public/optimization_result_part_${RUN_PART}.json`;
 
@@ -528,28 +665,29 @@ async function runSingleBacktest(marketId, realClient, config, marketInfoCache, 
     const realClient = await getClobClient();
     
     // часть 1
-    const entryPrices         = [0.42];
-    const hedge50Profits      = [0.01, 0.05, 0.11, 0.16, 0.21];
-    const rfProfits           = [0.05, 0.10, 0.15];
-    const arbitrageProfits    = [0.20, 0.25, 0.30, 0.35];
-    const budgetLimits        = [60, 80, 105];
-    const riskThresholds      = [-0.30,-0.50];
-    const targetLosses        = [-0.08, -0.01, 0.05]; 
-    const entryBidSize        = [10, 15];  
+    // const entryPrices         = [0.42];
+    // const hedge50Profits      = [0.01, 0.05, 0.11, 0.16, 0.21];
+    // const rfProfits           = [0.05, 0.10, 0.15];
+    // const arbitrageProfits    = [0.20, 0.25, 0.30, 0.35];
+    // const budgetLimits        = [60, 80, 105];
+    // const riskThresholds      = [-0.30,-0.50];
+    // const targetLosses        = [-0.08, -0.01, 0.05]; 
+    // const entryBidSize        = [10, 15];  
 
     // легкая для тестов
-    // const entryPrices         = [0.35];
-    // const hedge50Profits      = [0.01];
-    // const rfProfits           = [0.05];
-    // const arbitrageProfits    = [0.05];
-    // const budgetLimits        = [60];
-    // const riskThresholds      = [-0.30, -0.40];
-    // const targetLosses        = [-0.08, -0.01, 0.05];   
+    const entryPrices         = [0.42];
+    const hedge50Profits      = [0.05];
+    const rfProfits           = [0.05];
+    const arbitrageProfits    = [0.35];
+    const budgetLimits        = [60];
+    const riskThresholds      = [-0.50];
+    const targetLosses        = [-0.05]; 
+    const entryBidSize        = [15];  
 
     const fullCombinations  = [];
     for (const entry_price of entryPrices)
         for (const hedge50_profit of hedge50Profits)
-        for (const rf_profit of rfProfits)
+          for (const rf_profit of rfProfits)
             for (const arbitrage_profit of arbitrageProfits)
                 for (const budget_limit of budgetLimits)
                     for (const risk_threshold of riskThresholds)
@@ -590,23 +728,36 @@ async function runSingleBacktest(marketId, realClient, config, marketInfoCache, 
 
         console.log(`\n[${ci+1}/${combinations.length}] 🔧 Комбинация: entry=${config.entry_price} hedge50=${config.hedge50_profit} rf=${config.rf_profit} arb=${config.arbitrage_profit} budget=${config.budget_limit} riskThresholds=${config.risk_threshold} targetLosses=${config.target_loss}`); // ← добавить
 
-        // СОЗДАЕМ БОТА ОДИН РАЗ НА ВСЮ КОМБИНАЦИЮ
-        const currentBot = createAutoBidBot({
-            client: {},
-            placeArbitrageOrder: mockPlaceArbitrageOrder,
-            cancelOrderFn: mockCancelOrderFn,
-            getOrderFn: mockGetOrderFn,
-            getUserPositionsFn: mockGetUserPositionsFn,
-            onSignal: () => {},
-            config
-        });
-        // Устанавливаем в глобальную переменную для функций синхронизации
-        testBot = currentBot; 
+        // // СОЗДАЕМ БОТА ОДИН РАЗ НА ВСЮ КОМБИНАЦИЮ
+        // const currentBot = createAutoBidBot({
+        //     client: {},
+        //     placeArbitrageOrder: mockPlaceArbitrageOrder,
+        //     cancelOrderFn: mockCancelOrderFn,
+        //     getOrderFn: mockGetOrderFn,
+        //     getUserPositionsFn: mockGetUserPositionsFn,
+        //     onSignal: () => {},
+        //     config
+        // });
+        // // Устанавливаем в глобальную переменную для функций синхронизации
+        // testBot = currentBot; 
 
 
         for (let i = 0; i < files.length; i++) {
             const marketId = files[i].replace('.jsonl', '');
-            const result = await runSingleBacktest(marketId, realClient, config, marketInfoCache, currentBot);
+
+            const currentBot = createAutoBidBot({
+              client: {},
+              placeArbitrageOrder: mockPlaceArbitrageOrder,
+              cancelOrderFn: mockCancelOrderFn,
+              getOrderFn: mockGetOrderFn,
+              getUserPositionsFn: mockGetUserPositionsFn,
+              config
+            });
+
+          
+            testBot = currentBot;
+
+            const result = await runSingleBacktestVse(marketId, realClient, config, marketInfoCache, currentBot);
             
             // const statesCount = (marketStates instanceof Map) 
             // ? marketStates.size 
@@ -622,7 +773,8 @@ async function runSingleBacktest(marketId, realClient, config, marketInfoCache, 
                 if (result.pnl > 0) summary.wins++; else summary.losses++;
                 summary.markets++;
             }
-            
+            testBot = null;       // ← ОБЯЗАТЕЛЬНО
+            mockOrders = {};      // ← желательно            
         }
 
         // console.log(`[DEBUG] Перед очисткой: ${Object.keys(marketStates).length || marketStates.size} стейтов`);
@@ -699,11 +851,17 @@ async function runSingleBacktest(marketId, realClient, config, marketInfoCache, 
     process.exit(0);
 
   }
-
   main();
+}
+
+  
 
 
-// async function runBacktest() {
+
+  
+
+
+
 //     const filePath = path.join(LOGS_DIR, `${TEST_MARKET_ID}.jsonl`);
 //     if (!fs.existsSync(filePath)) return console.error(`❌ Файл не найден`);
   

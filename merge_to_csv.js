@@ -33,7 +33,7 @@ async function merge() {
     const header = [
         'Entry Price', 'Hedge50 Profit', 'RF Profit', 'Arb Profit', 
         'Budget Limit', 'Risk Threshold', 'Target Loss',
-        'Total PnL ($)', 'Total Invested ($)', 'Wins', 'Losses', 'Total Markets'
+        'Total PnL ($)', 'Total Invested ($)', 'Entry size', 'Wins', 'Losses', 'Total Markets'
     ].join(';');
 
     const csvRows = allRecords.map(item => {
@@ -51,6 +51,7 @@ async function merge() {
             toExcelNum(c.target_loss),
             toExcelNum(s.totalPnL.toFixed(2)),
             toExcelNum(s.totalInvested.toFixed(2)),
+            toExcelNum(c.entry_bid_size),
             s.wins,
             s.losses,
             s.markets
