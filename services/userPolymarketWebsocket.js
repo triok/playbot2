@@ -254,10 +254,10 @@ export class UserPolymarketWebsocket { // ← Имя класса с загла�
               // === Защита от резкого падения ===
               if(currentState.arbitrage === false){
                 if(trader_side == 'TAKER'){
-                  if(price < 0.90){
+                  // if(price < 0.90){
                     // sell_order
-                    await sellMarketOrder(this.client, opp, asset_id, market);
-                  }
+                    // await sellMarketOrder(this.client, opp, asset_id, market);
+                  // }
                 } else if(trader_side == 'MAKER'){
                   // const myMakerOrders = currentState.makerOrders || [];
                   // for (const makerOrder of maker_orders) {
@@ -334,7 +334,8 @@ export class UserPolymarketWebsocket { // ← Имя класса с загла�
                   );
               
                   if (order) {
-                    order.status = 'MATCHED';                
+                    order.status = 'MATCHED';
+                    order.price = price;              
                     order.matchedTime = nowTime();
                     const logText = `[${nowTime()}] WS User: Arbitrage order ${order.status}: ${outcome} | orderId=${taker_order_id}`;
                     pushMarketLog(opp.id, logText);                   
@@ -348,6 +349,7 @@ export class UserPolymarketWebsocket { // ← Имя класса с загла�
               
                     if (order) {
                       order.status = 'MATCHED';
+                      order.price = makerOrder.price;
                       order.matchedTime = nowTime();
                       const logText = `[${nowTime()}] WS User: Arbitrage order ${order.status}: ${makerOrder.outcome} | orderId=${makerOrder.order_id}`;
                       pushMarketLog(opp.id, logText);  

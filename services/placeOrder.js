@@ -1,5 +1,5 @@
 import { OrderType, Side } from "@polymarket/clob-client";
-import { arbitrageTestFlag } from "./utils.js"; 
+import { arbitrageTestFlag, nowTime } from "./utils.js"; 
 // import { pushMarketLog } from './marketLogs.js';
 // import { nowTime } from "./utils.js"; 
 /**
@@ -307,17 +307,18 @@ export async function placeArbitrageOrder(clobClient, orderParams, maxAttempts =
 
       // console.log(`🔄 Buy order attempt ${attempt}/${maxAttempts} | TickSize: ${currentTickSize}`);
       // console.log(`Expiration placetestorder: ${expiration}`);
-      console.log(`[PlaceOrder][PlaceArbitrageOrder]:`);
-      console.log({
-        tokenID,
-        price,
-        size,
-        amount,
-        side    
-      },
-      marketOptions,
-      order_type);
-      
+      // console.log(`[PlaceOrder][PlaceArbitrageOrder]:`);
+      // console.log({
+      //   tokenID,
+      //   price,
+      //   size,
+      //   amount,
+      //   side    
+      // },
+      // marketOptions,
+      // order_type);
+
+      console.log(`[${nowTime()}][PlaceOrder] Start placing order`);
       if(orderPrice > 0.990 && currentTickSize === "0.01"){
         orderPrice = 0.99;
       }
@@ -374,8 +375,9 @@ export async function placeArbitrageOrder(clobClient, orderParams, maxAttempts =
 
 
     
+      console.log(`[${nowTime()}][PlaceOrder] response:`, response);
 
-      console.log(`[PlaceOrder]`, response);
+      // console.log(`[PlaceOrder]`, response);
       return response;
       
     } catch (error) {

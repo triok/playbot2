@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Market Viewer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg:        #0a0c10;
+    --surface:   #111318;
+    --border:    #1e2230;
+    --entry:     #38bdf8;
+    --hedge:     #f472b6;
+    --green:     #4ade80;
+    --red:       #f87171;
+    --yellow:    #fbbf24;
+    --muted:     #4b5563;
+    --text:      #e2e8f0;
+    --text-dim:  #64748b;
+
+    --label-HOLD:           #374151;
+    --label-RECOVERY_BUY:   #7c3aed;
+    --label-BUY_WINNER:     #0ea5e9;
+    --label-BUY_LOSER:      #ec4899;
+    --label-BUY_BOTH:       #8b5cf6;
+    --label-GRID_BUY_LEADER:#f59e0b;
+    --label-CHEAP_BUY_LOSER:#10b981;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    min-height: 100vh;
+    padding: 24px;
+  }
+
+  h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+
+  /* ── UPLOAD ZONE ── */
+  #upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 48px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    margin-bottom: 28px;
+  }
+  #upload-zone:hover, #upload-zone.drag { border-color: var(--entry); background: #111a26; }
+  #upload-zone p { color: var(--text-dim); margin-top: 8px; font-size: 12px; }
+  #upload-zone input { display: none; }
+  .upload-icon { font-size: 36px; margin-bottom: 8px; }
+  .upload-title { font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 700; color: var(--text); }
+
+  /* ── HEADER INFO ── */
+  #info { display: none; margin-bottom: 20px; }
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .info-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+  }
+  .info-card .label { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .info-card .value { font-size: 15px; font-weight: 600; }
+  .winner-entry { color: var(--entry); }
+  .winner-hedge { color: var(--hedge); }
+
+  /* ── CHART ── */
+  #chart-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 20px;
+    position: relative;
+  }
+  #chart-wrap h2 { font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 14px; }
+  canvas { display: block; width: 100%; }
+
+  /* ── TOOLTIP ── */
+  #tooltip {
+    position: fixed;
+    background: #1a1f2e;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    pointer-events: none;
+    display: none;
+    z-index: 100;
+    min-width: 220px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  }
+  #tooltip .tt-title { font-family: 'Syne', sans-serif; font-weight: 700; margin-bottom: 6px; font-size: 13px; }
+  #tooltip .tt-row { display: flex; justify-content: space-between; gap: 16px; color: var(--text-dim); margin: 2px 0; }
+  #tooltip .tt-row span:last-child { color: var(--text); font-weight: 600; }
+  #tooltip .tt-label { display: inline-block; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 11px; margin-top: 6px; }
+
+  /* ── LEGEND ── */
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 12px;
+    margin-bottom: 8px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .legend-line { width: 20px; height: 2px; flex-shrink: 0; }
+
+  /* ── PNL CHART ── */
+  #pnl-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+  #pnl-wrap h2 { font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 14px; }
+
+  /* ── TABLE ── */
+  #table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+  #table-wrap h2 { font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; padding: 14px 16px 0; }
+
+  .table-filters {
+    padding: 12px 16px;
+    display: flex; gap: 8px; flex-wrap: wrap;
+  }
+  .filter-btn {
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .filter-btn:hover { border-color: var(--text-dim); color: var(--text); }
+  .filter-btn.active { color: var(--bg); font-weight: 700; }
+
+  .tbl-scroll { overflow-x: auto; max-height: 420px; overflow-y: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 900px; }
+  thead th {
+    background: #0d0f14;
+    padding: 8px 12px;
+    text-align: left;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-dim);
+    position: sticky; top: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  tbody tr { border-bottom: 1px solid #151821; transition: background 0.1s; }
+  tbody tr:hover { background: #151821; }
+  tbody tr.action-row { background: #13151e; }
+  tbody td { padding: 6px 12px; font-size: 12px; }
+  .label-badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+  }
+  .pos { color: var(--green); }
+  .neg { color: var(--red); }
+  .neutral { color: var(--text-dim); }
+
+  /* ── LABEL COLORS ── */
+  .lc-HOLD            { background: var(--label-HOLD); color: #9ca3af; }
+  .lc-RECOVERY_BUY    { background: #2e1065; color: #c4b5fd; }
+  .lc-BUY_WINNER      { background: #0c2340; color: #7dd3fc; }
+  .lc-BUY_LOSER       { background: #4a0020; color: #fbcfe8; }
+  .lc-BUY_BOTH        { background: #2e1065; color: #ddd6fe; }
+  .lc-GRID_BUY_LEADER { background: #451a03; color: #fde68a; }
+  .lc-CHEAP_BUY_LOSER { background: #052e16; color: #86efac; }
+
+  .leader-entry { color: var(--entry); font-weight: 600; }
+  .leader-hedge { color: var(--hedge); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>📊 Market Viewer</h1>
+<p style="color:var(--text-dim);margin-bottom:20px;font-size:12px;">Загрузи JSON файл маркета из папки training_data_labeled</p>
+
+<div id="upload-zone" onclick="document.getElementById('file-input').click()">
+  <div class="upload-icon">📂</div>
+  <div class="upload-title">Перетащи файл или нажми чтобы выбрать</div>
+  <p>*.json файл из training_data_labeled</p>
+  <input type="file" id="file-input" accept=".json">
+</div>
+
+<div id="info">
+  <div class="info-grid" id="info-grid"></div>
+
+  <div id="chart-wrap">
+    <h2>Цены исходов</h2>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-line" style="background:var(--entry)"></div> Entry</div>
+      <div class="legend-item"><div class="legend-line" style="background:var(--hedge)"></div> Hedge</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--label-GRID_BUY_LEADER)"></div> GRID_BUY_LEADER</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--label-RECOVERY_BUY)"></div> RECOVERY_BUY</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--label-BUY_WINNER)"></div> BUY_WINNER</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--label-BUY_LOSER)"></div> BUY_LOSER</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--label-BUY_BOTH)"></div> BUY_BOTH</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--label-CHEAP_BUY_LOSER)"></div> CHEAP_BUY_LOSER</div>
+    </div>
+    <canvas id="price-chart" height="280"></canvas>
+  </div>
+
+  <div id="pnl-wrap">
+    <h2>PnL % (sim портфель)</h2>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-line" style="background:var(--entry)"></div> pct_entry</div>
+      <div class="legend-item"><div class="legend-line" style="background:var(--hedge)"></div> pct_hedge</div>
+      <div class="legend-item"><div class="legend-line" style="background:var(--green);height:1px;border-top:1px dashed var(--green)"></div> RF порог (+5%)</div>
+    </div>
+    <canvas id="pnl-chart" height="200"></canvas>
+  </div>
+
+  <div id="table-wrap">
+    <h2>Снапшоты</h2>
+    <div class="table-filters">
+      <button class="filter-btn active" data-filter="all" onclick="setFilter('all', this)">Все</button>
+      <button class="filter-btn" data-filter="actions" onclick="setFilter('actions', this)">Только действия</button>
+      <button class="filter-btn lc-GRID_BUY_LEADER" data-filter="GRID_BUY_LEADER" onclick="setFilter('GRID_BUY_LEADER', this)">GRID</button>
+      <button class="filter-btn lc-RECOVERY_BUY" data-filter="RECOVERY_BUY" onclick="setFilter('RECOVERY_BUY', this)">RECOVERY</button>
+      <button class="filter-btn lc-BUY_WINNER" data-filter="BUY_WINNER" onclick="setFilter('BUY_WINNER', this)">BUY_WINNER</button>
+      <button class="filter-btn lc-BUY_LOSER" data-filter="BUY_LOSER" onclick="setFilter('BUY_LOSER', this)">BUY_LOSER</button>
+      <button class="filter-btn lc-BUY_BOTH" data-filter="BUY_BOTH" onclick="setFilter('BUY_BOTH', this)">BUY_BOTH</button>
+      <button class="filter-btn lc-CHEAP_BUY_LOSER" data-filter="CHEAP_BUY_LOSER" onclick="setFilter('CHEAP_BUY_LOSER', this)">CHEAP</button>
+    </div>
+    <div class="tbl-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>sec_left</th>
+            <th>leader</th>
+            <th>p_entry</th>
+            <th>p_hedge</th>
+            <th>sim_e</th>
+            <th>sim_h</th>
+            <th>sim_spent</th>
+            <th>pct_entry</th>
+            <th>pct_hedge</th>
+            <th>WCS</th>
+            <th>label</th>
+            <th>detail</th>
+          </tr>
+        </thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="tooltip">
+  <div class="tt-title" id="tt-title"></div>
+  <div id="tt-body"></div>
+</div>
+
+<script>
+let marketData = null;
+let currentFilter = 'all';
+
+// ── DRAG & DROP ──
+const zone = document.getElementById('upload-zone');
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+zone.addEventListener('drop', e => {
+  e.preventDefault();
+  zone.classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (file) readFile(file);
+});
+document.getElementById('file-input').addEventListener('change', e => {
+  if (e.target.files[0]) readFile(e.target.files[0]);
+});
+
+function readFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      marketData = JSON.parse(e.target.result);
+      render(marketData);
+    } catch(err) {
+      alert('Ошибка парсинга JSON: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+// ── RENDER ──
+function render(data) {
+  document.getElementById('upload-zone').style.display = 'none';
+  document.getElementById('info').style.display = 'block';
+
+  const snaps = data.snapshots;
+  const winner = data.winner;
+  const entryOutcome = data.entry?.outcome || '?';
+  const hedgeOutcome = data.hedge?.outcome || '?';
+  const winnerIsHedge = data.winner_is_hedge;
+
+  // Финальный PnL
+  const last = snaps[snaps.length - 1];
+  const finalPctE = last.pnl_pct_if_entry_wins;
+  const finalPctH = last.pnl_pct_if_hedge_wins;
+  const finalWinner = winnerIsHedge ? finalPctH : finalPctE;
+
+  // Считаем лейблы
+  const labelCounts = {};
+  snaps.forEach(s => { labelCounts[s.label] = (labelCounts[s.label] || 0) + 1; });
+  const actions = snaps.filter(s => s.label !== 'HOLD').length;
+
+  // Info cards
+  document.getElementById('info-grid').innerHTML = `
+    <div class="info-card">
+      <div class="label">Маркет ID</div>
+      <div class="value" style="font-size:10px;word-break:break-all;color:var(--text-dim)">${data.marketId || '—'}</div>
+    </div>
+    <div class="info-card">
+      <div class="label">Entry</div>
+      <div class="value ${winnerIsHedge ? '' : 'winner-entry'}">${entryOutcome} ${winnerIsHedge ? '' : '🏆'}</div>
+    </div>
+    <div class="info-card">
+      <div class="label">Hedge</div>
+      <div class="value ${winnerIsHedge ? 'winner-hedge' : ''}">${hedgeOutcome} ${winnerIsHedge ? '🏆' : ''}</div>
+    </div>
+    <div class="info-card">
+      <div class="label">Winner</div>
+      <div class="value ${winnerIsHedge ? 'winner-hedge' : 'winner-entry'}">${winner}</div>
+    </div>
+    <div class="info-card">
+      <div class="label">Итог PnL (победитель)</div>
+      <div class="value ${finalWinner >= 5 ? 'pos' : finalWinner >= 0 ? '' : 'neg'}">${finalWinner >= 0 ? '+' : ''}${finalWinner.toFixed(1)}%</div>
+    </div>
+    <div class="info-card">
+      <div class="label">Потрачено / Бюджет</div>
+      <div class="value">$${last.sim_total_spent.toFixed(2)} / $80</div>
+    </div>
+    <div class="info-card">
+      <div class="label">Снапшотов / Действий</div>
+      <div class="value">${snaps.length} / <span style="color:var(--yellow)">${actions}</span></div>
+    </div>
+    <div class="info-card">
+      <div class="label">RF достигнут?</div>
+      <div class="value ${finalPctE >= 5 && finalPctH >= 5 ? 'pos' : 'neg'}">${finalPctE >= 5 && finalPctH >= 5 ? '✅ Да' : '❌ Нет'}</div>
+    </div>
+  `;
+
+  drawPriceChart(snaps);
+  drawPnlChart(snaps);
+  renderTable(snaps);
+}
+
+// ── CHART HELPERS ──
+const LABEL_COLORS = {
+  HOLD:            null,
+  RECOVERY_BUY:    '#7c3aed',
+  BUY_WINNER:      '#0ea5e9',
+  BUY_LOSER:       '#ec4899',
+  BUY_BOTH:        '#8b5cf6',
+  GRID_BUY_LEADER: '#f59e0b',
+  CHEAP_BUY_LOSER: '#10b981',
+};
+
+function setupCanvas(id) {
+  const canvas = document.getElementById(id);
+  const wrap = canvas.parentElement;
+  const dpr = window.devicePixelRatio || 1;
+  const w = wrap.clientWidth - 32;
+  const h = parseInt(canvas.getAttribute('height'));
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  return { ctx, w, h };
+}
+
+function drawPriceChart(snaps) {
+  const { ctx, w, h } = setupCanvas('price-chart');
+  const PAD = { top: 10, right: 20, bottom: 30, left: 45 };
+  const cw = w - PAD.left - PAD.right;
+  const ch = h - PAD.top - PAD.bottom;
+
+  ctx.clearRect(0, 0, w, h);
+
+  const xOf = i => PAD.left + (i / (snaps.length - 1)) * cw;
+  const yOf = v => PAD.top + (1 - v) * ch;
+
+  // Grid lines
+  ctx.strokeStyle = '#1e2230';
+  ctx.lineWidth = 1;
+  [0, 0.25, 0.5, 0.75, 1].forEach(v => {
+    ctx.beginPath();
+    ctx.moveTo(PAD.left, yOf(v));
+    ctx.lineTo(PAD.left + cw, yOf(v));
+    ctx.stroke();
+    ctx.fillStyle = '#4b5563';
+    ctx.font = '10px JetBrains Mono';
+    ctx.fillText(v.toFixed(2), 2, yOf(v) + 4);
+  });
+
+  // Action markers (vertical lines)
+  snaps.forEach((s, i) => {
+    if (s.label === 'HOLD') return;
+    const color = LABEL_COLORS[s.label];
+    if (!color) return;
+    ctx.strokeStyle = color + '40';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(xOf(i), PAD.top);
+    ctx.lineTo(xOf(i), PAD.top + ch);
+    ctx.stroke();
+  });
+
+  // Entry line
+  ctx.beginPath();
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 2;
+  snaps.forEach((s, i) => {
+    i === 0 ? ctx.moveTo(xOf(i), yOf(s.price_entry)) : ctx.lineTo(xOf(i), yOf(s.price_entry));
+  });
+  ctx.stroke();
+
+  // Hedge line
+  ctx.beginPath();
+  ctx.strokeStyle = '#f472b6';
+  ctx.lineWidth = 2;
+  snaps.forEach((s, i) => {
+    i === 0 ? ctx.moveTo(xOf(i), yOf(s.price_hedge)) : ctx.lineTo(xOf(i), yOf(s.price_hedge));
+  });
+  ctx.stroke();
+
+  // Action dots
+  snaps.forEach((s, i) => {
+    if (s.label === 'HOLD') return;
+    const color = LABEL_COLORS[s.label];
+    if (!color) return;
+    // dot on entry price
+    ctx.beginPath();
+    ctx.arc(xOf(i), yOf(s.price_entry), 5, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = '#0a0c10';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  });
+
+  // X axis ticks (seconds_left)
+  ctx.fillStyle = '#4b5563';
+  ctx.font = '10px JetBrains Mono';
+  const step = Math.floor(snaps.length / 6);
+  for (let i = 0; i < snaps.length; i += step) {
+    ctx.fillText(snaps[i].seconds_left + 's', xOf(i) - 12, h - 8);
+  }
+
+  // Tooltip interaction
+  const canvas = document.getElementById('price-chart');
+  canvas._snaps = snaps;
+  canvas._xOf = xOf;
+  canvas._yOf = yOf;
+  canvas._PAD = PAD;
+  canvas._cw = cw;
+  canvas.onmousemove = e => showTooltip(e, canvas, snaps, xOf);
+  canvas.onmouseleave = () => { document.getElementById('tooltip').style.display = 'none'; };
+}
+
+function drawPnlChart(snaps) {
+  const { ctx, w, h } = setupCanvas('pnl-chart');
+  const PAD = { top: 10, right: 20, bottom: 30, left: 50 };
+  const cw = w - PAD.left - PAD.right;
+  const ch = h - PAD.top - PAD.bottom;
+
+  ctx.clearRect(0, 0, w, h);
+
+  const allPcts = snaps.flatMap(s => [s.pnl_pct_if_entry_wins, s.pnl_pct_if_hedge_wins]);
+  const minP = Math.min(...allPcts, -10);
+  const maxP = Math.max(...allPcts, 10);
+  const range = maxP - minP;
+
+  const xOf = i => PAD.left + (i / (snaps.length - 1)) * cw;
+  const yOf = v => PAD.top + (1 - (v - minP) / range) * ch;
+
+  // Grid + labels
+  ctx.strokeStyle = '#1e2230';
+  ctx.lineWidth = 1;
+  const gridVals = [];
+  for (let v = Math.ceil(minP / 10) * 10; v <= maxP; v += 10) gridVals.push(v);
+  gridVals.forEach(v => {
+    ctx.beginPath();
+    ctx.moveTo(PAD.left, yOf(v));
+    ctx.lineTo(PAD.left + cw, yOf(v));
+    ctx.stroke();
+    ctx.fillStyle = v === 0 ? '#94a3b8' : '#4b5563';
+    ctx.font = '10px JetBrains Mono';
+    ctx.fillText((v >= 0 ? '+' : '') + v + '%', 2, yOf(v) + 4);
+  });
+
+  // Zero line
+  if (minP < 0 && maxP > 0) {
+    ctx.strokeStyle = '#374151';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(PAD.left, yOf(0));
+    ctx.lineTo(PAD.left + cw, yOf(0));
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // RF line (+5%)
+  ctx.strokeStyle = '#4ade8040';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 5]);
+  ctx.beginPath();
+  ctx.moveTo(PAD.left, yOf(5));
+  ctx.lineTo(PAD.left + cw, yOf(5));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Action markers
+  snaps.forEach((s, i) => {
+    if (s.label === 'HOLD') return;
+    const color = LABEL_COLORS[s.label];
+    if (!color) return;
+    ctx.strokeStyle = color + '30';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(xOf(i), PAD.top);
+    ctx.lineTo(xOf(i), PAD.top + ch);
+    ctx.stroke();
+  });
+
+  // Entry PnL
+  ctx.beginPath();
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 2;
+  snaps.forEach((s, i) => {
+    i === 0 ? ctx.moveTo(xOf(i), yOf(s.pnl_pct_if_entry_wins)) : ctx.lineTo(xOf(i), yOf(s.pnl_pct_if_entry_wins));
+  });
+  ctx.stroke();
+
+  // Hedge PnL
+  ctx.beginPath();
+  ctx.strokeStyle = '#f472b6';
+  ctx.lineWidth = 2;
+  snaps.forEach((s, i) => {
+    i === 0 ? ctx.moveTo(xOf(i), yOf(s.pnl_pct_if_hedge_wins)) : ctx.lineTo(xOf(i), yOf(s.pnl_pct_if_hedge_wins));
+  });
+  ctx.stroke();
+
+  // X ticks
+  ctx.fillStyle = '#4b5563';
+  ctx.font = '10px JetBrains Mono';
+  const step = Math.floor(snaps.length / 6);
+  for (let i = 0; i < snaps.length; i += step) {
+    ctx.fillText(snaps[i].seconds_left + 's', xOf(i) - 12, h - 8);
+  }
+}
+
+// ── TOOLTIP ──
+function showTooltip(e, canvas, snaps, xOf) {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const PAD_LEFT = 45;
+  const cw = rect.width - PAD_LEFT - 20;
+
+  let closest = 0;
+  let minDist = Infinity;
+  snaps.forEach((_, i) => {
+    const x = PAD_LEFT + (i / (snaps.length - 1)) * cw;
+    const d = Math.abs(x - mx);
+    if (d < minDist) { minDist = d; closest = i; }
+  });
+
+  const s = snaps[closest];
+  const tt = document.getElementById('tooltip');
+  const pctE = s.pnl_pct_if_entry_wins;
+  const pctH = s.pnl_pct_if_hedge_wins;
+  const wcs = Math.min(pctE, pctH);
+
+  document.getElementById('tt-title').textContent = `Снап #${closest} | ${s.seconds_left}s left`;
+  document.getElementById('tt-body').innerHTML = `
+    <div class="tt-row"><span>price_entry</span><span style="color:#38bdf8">${s.price_entry.toFixed(3)}</span></div>
+    <div class="tt-row"><span>price_hedge</span><span style="color:#f472b6">${s.price_hedge.toFixed(3)}</span></div>
+    <div class="tt-row"><span>leader</span><span class="${s.leader === 'entry' ? 'leader-entry' : 'leader-hedge'}">${s.leader}</span></div>
+    <div class="tt-row"><span>sim_spent</span><span>$${s.sim_total_spent.toFixed(2)}</span></div>
+    <div class="tt-row"><span>sim_e / sim_h</span><span>${s.sim_shares_entry.toFixed(1)} / ${s.sim_shares_hedge.toFixed(2)}</span></div>
+    <div class="tt-row"><span>pct_entry</span><span class="${pctE>=0?'pos':'neg'}">${pctE>=0?'+':''}${pctE.toFixed(1)}%</span></div>
+    <div class="tt-row"><span>pct_hedge</span><span class="${pctH>=0?'pos':'neg'}">${pctH>=0?'+':''}${pctH.toFixed(1)}%</span></div>
+    <div class="tt-row"><span>WCS</span><span class="${wcs>=5?'pos':wcs>=0?'':'neg'}">${wcs>=0?'+':''}${wcs.toFixed(1)}%</span></div>
+    <div><span class="tt-label lc-${s.label}">${s.label}</span></div>
+    ${s.label !== 'HOLD' ? `<div style="color:#64748b;font-size:11px;margin-top:4px">${JSON.stringify(s.label_detail)}</div>` : ''}
+  `;
+
+  tt.style.display = 'block';
+  const ttW = 240, ttH = 220;
+  let tx = e.clientX + 14, ty = e.clientY - 10;
+  if (tx + ttW > window.innerWidth) tx = e.clientX - ttW - 14;
+  if (ty + ttH > window.innerHeight) ty = window.innerHeight - ttH - 10;
+  tt.style.left = tx + 'px';
+  tt.style.top = ty + 'px';
+}
+
+// ── TABLE ──
+function renderTable(snaps) {
+  const tbody = document.getElementById('table-body');
+  const rows = snaps.map((s, i) => {
+    const pctE = s.pnl_pct_if_entry_wins;
+    const pctH = s.pnl_pct_if_hedge_wins;
+    const wcs = Math.min(pctE, pctH);
+    const isAction = s.label !== 'HOLD';
+    const detail = s.label !== 'HOLD' ? JSON.stringify(s.label_detail).replace(/[{}""]/g,'').replace(/,/g,' ') : '—';
+
+    return `<tr class="${isAction ? 'action-row' : ''}" data-label="${s.label}">
+      <td style="color:var(--text-dim)">${i}</td>
+      <td>${s.seconds_left}</td>
+      <td class="${s.leader === 'entry' ? 'leader-entry' : 'leader-hedge'}">${s.leader}</td>
+      <td style="color:#38bdf8">${s.price_entry.toFixed(3)}</td>
+      <td style="color:#f472b6">${s.price_hedge.toFixed(3)}</td>
+      <td>${s.sim_shares_entry.toFixed(1)}</td>
+      <td>${s.sim_shares_hedge.toFixed(2)}</td>
+      <td>$${s.sim_total_spent.toFixed(2)}</td>
+      <td class="${pctE>=5?'pos':pctE>=0?'':'neg'}">${pctE>=0?'+':''}${pctE.toFixed(1)}%</td>
+      <td class="${pctH>=5?'pos':pctH>=0?'':'neg'}">${pctH>=0?'+':''}${pctH.toFixed(1)}%</td>
+      <td class="${wcs>=5?'pos':wcs>=0?'':'neg'}" style="font-weight:600">${wcs>=0?'+':''}${wcs.toFixed(1)}%</td>
+      <td><span class="label-badge lc-${s.label}">${s.label}</span></td>
+      <td style="color:var(--text-dim);font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${detail}</td>
+    </tr>`;
+  });
+  tbody.innerHTML = rows.join('');
+  applyFilter(currentFilter);
+}
+
+function setFilter(filter, btn) {
+  currentFilter = filter;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  applyFilter(filter);
+}
+
+function applyFilter(filter) {
+  document.querySelectorAll('#table-body tr').forEach(row => {
+    const label = row.dataset.label;
+    if (filter === 'all') row.style.display = '';
+    else if (filter === 'actions') row.style.display = label !== 'HOLD' ? '' : 'none';
+    else row.style.display = label === filter ? '' : 'none';
+  });
+}
+</script>
+</body>
+</html>

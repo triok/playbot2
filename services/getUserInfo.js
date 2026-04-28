@@ -11,6 +11,7 @@
 // 0xe508dbc11ab8362ef1ee50757005e372992ba24c   чел который ставит на 0.03
 // 0x1d0034134e339a309700ff2d34e99fa2d48b0313   ставит постоянно на два исхода, разобрать стратегию
 // 0xd0d6053c3c37e727402d84c14069780d360993aa ставит постоянно на два исхода, разобрать стратегию
+// 0xe1d6b51521bd4365769199f392f9818661bd907c хорошо идет, тоже оба исхода
 
 import fs from 'fs';
 import path from 'path';
@@ -81,7 +82,7 @@ export async function getUserActivity(userAddress) {
         // Добавляем каждую сделку в буфер
         for (const trade of trades) {
           if (trade.type === 'TRADE' && trade.conditionId && trade.transactionHash) {
-            addToTradeBuffer(trade);
+            addToTradeBuffer(trade, userAddress);
           }
         }
     
@@ -93,7 +94,7 @@ export async function getUserActivity(userAddress) {
 
 
 
-function addToTradeBuffer(trade) {
+function addToTradeBuffer(trade, userAddress) {
     const { conditionId, transactionHash } = trade;
   
     // ❌ Пропускаем дубликаты
@@ -129,16 +130,23 @@ function addToTradeBuffer(trade) {
   
     // Запускаем отложенный сброс (если ещё не запущен)
     if (!flushTimeout) {
-      flushTimeout = setTimeout(flushTradeBuffer, 10000); // сбрасываем раз в 10 сек
-    }
-  }
+      flushTimeout = setTimeout(() => flushTradeBuffer(userAddress), 10000);
+    }    
+    // if (!flushTimeout) {
+    //   flushTimeout = setTimeout(flushTradeBuffer, 10000); // сбрасываем раз в 10 сек
+    // }
+}
 
-
-  function flushTradeBuffer() {
+function flushTradeBuffer(userAddress) {
     console.log(`💾 Flushing ${tradeBuffer.size} condition(s) to disk...`);
-  
+
+    const userDir = path.join(TRADES_DIR, userAddress);
+    if (!fs.existsSync(userDir)) {
+      fs.mkdirSync(userDir, { recursive: true });
+    }
+
     for (const [conditionId, trades] of tradeBuffer.entries()) {
-      const filePath = path.join(TRADES_DIR, `${conditionId}.json`);
+      const filePath = path.join(userDir, `${conditionId}.json`);
       let existingTrades = [];
   
       // Читаем существующие данные
@@ -166,4 +174,4 @@ function addToTradeBuffer(trade) {
     // Очищаем буфер
     tradeBuffer.clear();
     flushTimeout = null;
-  }
+}

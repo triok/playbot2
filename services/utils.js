@@ -59,14 +59,29 @@ const KEYWORD_TO_SYMBOL = {
   'ripple': 'XRP'
 };
 
+// export const priceThresholds = {
+//   // BTC: 55, отлично
+//   // BTC: 45, был 1 промах на 47 5 минутный маркет
+//   BTC: 51,
+//   ETH: 2,
+//   SOL: 0.32,
+//   XRP: 0.0021
+// };
+
 export const priceThresholds = {
-  // BTC: 55, отлично
-  // BTC: 45, был 1 промах на 47 5 минутный маркет
-  BTC: 51,
-  ETH: 5,
-  SOL: 0.32,
-  XRP: 0.0031
+  BTC: 41,
+  // ETH: 0.82,
+  ETH: 0.55,
+  SOL: 0.01,
+  XRP: 0.0020
 };
+
+export const priceThresholds5m = {
+  BTC: 15,
+  ETH: 0.5,
+  SOL: 0.7,
+  XRP: 0.0015
+}
 
 export const priceThresholds0999 = {
   BTC: 25,
@@ -265,3 +280,4 @@ export function isBotDisabledNow() {
     return currentMinutes >= startMin && currentMinutes <= endMin;
   });
 }
+

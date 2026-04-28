@@ -165,21 +165,21 @@ export async function getOpportunities({
       );
 
       let startDate;
-      // if(market.gameStartTime){
-      //   startDate = formatMoscowDateTime(market.gameStartTime);
-      // }
-      // if(foundKeyword == 'lol' || foundKeyword == 'dota' || foundKeyword == 'Counter-Strike' || foundKeyword == 'honor' || foundKeyword == 'valorant'){
-      //   startDate = formatMoscowDateTime(market.gameStartTime);
-      //   // if(!market.groupItemTitle.toLowerCase().includes('winner') && !market.groupItemTitle.toLowerCase().includes('moneyline')){
-      //   //   continue;
-      //   // }
-      // } else {
-      //   // const thisMarketmaxTimeHours = 1;
-      //   // const thisMarketfuture = new Date(now.getTime() + thisMarketmaxTimeHours * 60 * 60 * 1000); 
-      //   // const thisMarketendDate = new Date(market.endDate || event.endDate);
-      //   // if (thisMarketendDate <= now || thisMarketendDate > thisMarketfuture) continue;        
+      if(market.gameStartTime){
+        startDate = formatMoscowDateTime(market.gameStartTime);
+      }
+      if(foundKeyword == 'lol' || foundKeyword == 'dota' || foundKeyword == 'Counter-Strike' || foundKeyword == 'honor' || foundKeyword == 'valorant'){
+        startDate = formatMoscowDateTime(market.gameStartTime);
+        // if(!market.groupItemTitle.toLowerCase().includes('winner') && !market.groupItemTitle.toLowerCase().includes('moneyline')){
+        //   continue;
+        // }
+      } else {
+        // const thisMarketmaxTimeHours = 1;
+        // const thisMarketfuture = new Date(now.getTime() + thisMarketmaxTimeHours * 60 * 60 * 1000); 
+        // const thisMarketendDate = new Date(market.endDate || event.endDate);
+        // if (thisMarketendDate <= now || thisMarketendDate > thisMarketfuture) continue;        
 
-      // } 
+      } 
 
 
       const opp = {
@@ -220,14 +220,18 @@ export async function getOpportunities({
         continue;   // ❌ НЕ крипта — пропускаем
       }     
 
-      // if((opp.marketType == '5M' && opp.keyword == 'bitcoin') || opp.marketType == '15M' || opp.marketType == '1H'){
+      // if((opp.marketType == '5M' && opp.keyword == 'bitcoin' || opp.marketType == '5M' && opp.keyword == 'ethereum') || opp.marketType == '15M' || opp.marketType == '1H'){ // часовые и 5 мин
         if(opp.marketType == '15M'){
         opportunities.push(opp);  
       }
-      // if(startDate != 0){
+
+      // подключить соккер
+      // if(startDate != undefined){
+      //   console.log(startDate);
       //   const gameStart = new Date(market.gameStartTime);
       //   const fourHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000);        
       //   if (gameStart <= fourHoursLater && gameStart.getTime() + 2 * 60 * 60 * 1000 >= now.getTime()) {
+      //     console.log('added');
       //     opportunities.push(opp);
       //   }
 

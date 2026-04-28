@@ -140,7 +140,7 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`[SERVER] Initial balance cached: $${cachedBalance}`);
     
     // --- Автоматический Claim ---
-    await startClaimScheduler(client, relayClient);
+    // await startClaimScheduler(client, relayClient);
 
     // --- Запуск файла autobidbot ---
     const autoBidBot = await createAutoBidBot({
@@ -185,8 +185,12 @@ server.listen(PORT, '0.0.0.0', () => {
     // getUserActivity('0xfe61da21ebdf55a8916d0e34205f0cf4989505cd');   // ← activity
 
     // setInterval(() => {
-    //   getUserActivity('0x1d0034134e339a309700ff2d34e99fa2d48b0313');  // ← activity слежение
+    //   getUserActivity('0xe1d6b51521bd4365769199f392f9818661bd907c');  // ← activity слежение
     // }, 60 * 1000);  
+
+    setInterval(() => {
+      getUserActivity('0xFe61Da21eBdf55a8916d0e34205F0cf4989505cd');  // ← мой аккаунт
+    }, 60 * 1000);    
 
     // await getOrder("0xf1c3ae7bb200e9829617fef77bf8b831cd5049803e625afd2f625d0f2876a34f", client); // ← проверка ордера
     // await getMarket("0xbea3e83dbbaee460f8de12195a7580cf961cb1a4f7679c3540145c6f7687b91f", client); // ← проверка маркета
@@ -200,19 +204,19 @@ server.listen(PORT, '0.0.0.0', () => {
 clearOrderDataFile();
 
 // --- Chainlink Websocket ---
-// const chainlinkWS = new ChainlinkWebSocket({
-//   broadcast: (message) => {
-//     // Отправляем всем подключенным клиентам
-//     wss.clients.forEach((client) => {
-//       if (client.readyState === WebSocket.OPEN) {
-//         client.send(JSON.stringify(message));
-//       }
-//     });
-//   }
-// });
+const chainlinkWS = new ChainlinkWebSocket({
+  broadcast: (message) => {
+    // Отправляем всем подключенным клиентам
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(message));
+      }
+    });
+  }
+});
 
-// // Запускаем подключение
-// chainlinkWS.connect();
+// Запускаем подключение
+chainlinkWS.connect();
 
 
 // --- Websocket frontend ---
