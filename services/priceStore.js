@@ -4,91 +4,107 @@ const prices = new Map(); // key: symbol (BTC, ETH, SOL, XRP), value: { price, t
 const lastUpdate = {}; // для отслеживания времени последнего обновления
 
 /**
- * Обновляет цену для символа
+ * Обновляет цену для символа с указанием источника
+ * @param {string} symbol - 'BTC', 'ETH'
+ * @param {number} price - Цена
+ * @param {string} source - 'chainlink' или 'binance'
  */
-export function updatePrice(symbol, price) {
+export function updatePrice(symbol, price, source = 'chainlink') {
   const timestamp = Date.now();
   
-  prices.set(symbol, {
-    price: price,
-    timestamp: timestamp
-  });
-  
-  lastUpdate[symbol] = timestamp;
-  
-//   console.log(`[PriceStore] ${symbol}: $${price.toFixed(2)}`);
-//   console.log(prices);
-}
-
-/**
- * Получает текущую цену для символа
- */
-export function getPrice(symbol) {
-  const data = prices.get(symbol);
-
-  if (!data) {
-    // console.warn(`[PriceStore] Price not found for ${symbol}`);
-    return null;
+  if (!prices.has(symbol)) {
+    prices.set(symbol, {});
   }
   
-  return data.price;
+  const symbolData = prices.get(symbol);
+  symbolData[source] = { price, timestamp };
+  
+  if (!lastUpdate[symbol]) lastUpdate[symbol] = {};
+  lastUpdate[symbol][source] = timestamp;
 }
 
 /**
- * Получает все цены
+ * Получает текущую цену для символа и источника
  */
-export function getAllPrices() {
+export function getPrice(symbol, source = 'chainlink') {
+  const symbolData = prices.get(symbol);
+  if (!symbolData || !symbolData[source]) return null;
+  return symbolData[source].price;
+}
+
+/**
+ * Получает все цены (например, для вывода всех текущих цен на фронт)
+ * По умолчанию возвращает цены chainlink, чтобы не сломать старый код
+ */
+export function getAllPrices(source = 'chainlink') {
   const result = {};
   
-  prices.forEach((data, symbol) => {
-    result[symbol] = data.price;
+  prices.forEach((symbolData, symbol) => {
+    if (symbolData[source]) {
+      result[symbol] = symbolData[source].price;
+    }
   });
   
   return result;
 }
 
 /**
- * Проверяет, актуальна ли цена (не старше maxAgeMs миллисекунд)
+ * Получает цены из всех источников для символа
+ * Возвращает: { chainlink: 60000, binance: 60010 }
  */
-export function isPriceFresh(symbol, maxAgeMs = 10000) {
-  const data = prices.get(symbol);
+export function getAllSourcesPrice(symbol) {
+  const symbolData = prices.get(symbol);
+  if (!symbolData) return { chainlink: null, binance: null };
   
-  if (!data) {
+  return {
+    chainlink: symbolData.chainlink ? symbolData.chainlink.price : null,
+    binance: symbolData.binance ? symbolData.binance.price : null
+  };
+}
+
+
+/**
+ * Проверяет, актуальна ли цена (не старше maxAgeMs миллисекунд)
+ * Добавлен параметр source (по умолчанию 'chainlink')
+ */
+export function isPriceFresh(symbol, maxAgeMs = 10000, source = 'chainlink') {
+  const symbolData = prices.get(symbol);
+  
+  // Если нет данных по символу или конкретному источнинику
+  if (!symbolData || !symbolData[source]) {
     return false;
   }
   
-  const age = Date.now() - data.timestamp;
+  const age = Date.now() - symbolData[source].timestamp;
   return age < maxAgeMs;
 }
 
 /**
  * Получает данные о цене с временем обновления
  */
-export function getPriceWithTimestamp(symbol) {
-  const data = prices.get(symbol);
-  
-  if (!data) {
-    return null;
-  }
+export function getPriceWithTimestamp(symbol, source = 'chainlink') {
+  const symbolData = prices.get(symbol);
+  if (!symbolData || !symbolData[source]) return null;
   
   return {
-    price: data.price,
-    timestamp: data.timestamp,
-    age: Date.now() - data.timestamp
+    price: symbolData[source].price,
+    timestamp: symbolData[source].timestamp,
+    age: Date.now() - symbolData[source].timestamp
   };
 }
+
 
 /**
  * Возвращает время последнего обновления для символа
  */
-export function getLastUpdateTime(symbol) {
-  const data = prices.get(symbol);
+export function getLastUpdateTime(symbol, source = 'chainlink') {
+  const symbolData = prices.get(symbol);
   
-  if (!data) {
+  if (!symbolData || !symbolData[source]) {
     return null;
   }
   
-  return data.timestamp;
+  return symbolData[source].timestamp;
 }
 
 /**

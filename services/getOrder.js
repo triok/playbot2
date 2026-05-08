@@ -10,7 +10,7 @@ export async function getOrder(orderID, client) {
               id: orderID,
               status: "MATCHED",
               price: 0.42,
-              size_matched: 15
+              size_matched: 6
           }
           // <-- тест 
         } else {

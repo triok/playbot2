@@ -199,12 +199,25 @@ export async function syncResolvedMarkets(client) {
 export function cleanupResolvedButUnusedMarkets() {
   const now = new Date();
   const initialCount = cachedOpportunities.length;
+
+  // Время самой игры (4 часа)
+  const MATCH_DURATION_MS = 4 * 60 * 60 * 1000; 
+  // Буфер после игры (20 минут)
+
   const EXPIRATION_BUFFER_MS = 20 * 60 * 1000; // 20 минут в миллисекундах
+
+  
   const assetsToUnsubscribe = [];
 
   cachedOpportunities = cachedOpportunities.filter(opp => {
     const state = marketStates.get(opp.id);
-    const isExpired = new Date(opp.rawEndDate).getTime() + EXPIRATION_BUFFER_MS <= now;
+
+    let isExpired;
+    if(opp.marketType === '5M' || opp.marketType === '15M' || opp.marketType === '1H'){
+      isExpired = new Date(opp.rawEndDate).getTime() + EXPIRATION_BUFFER_MS <= now;
+    } else {
+      isExpired = new Date(opp.rawEndDate).getTime() + MATCH_DURATION_MS + EXPIRATION_BUFFER_MS <= now;
+    } 
 
     if (isExpired && opp.outcomes && Array.isArray(opp.outcomes)) {
       opp.outcomes.forEach(outcome => {
@@ -217,7 +230,7 @@ export function cleanupResolvedButUnusedMarkets() {
     // ❌ Удаляем, если рынок истёк И не был использован
     if (isExpired) {
       // Случай 1: вообще нет состояния → точно не участвовали
-      if (!state) {
+      if (!state || !state.phase || state.phase === "leader_search") {
         console.log(`[MARKET CACHE] Removing expired market (no state): ${opp.title} (${opp.id})`);
         opp.outcomes?.forEach(o => { if (o.assetId) assetsToUnsubscribe.push(o.assetId); });
         return false;

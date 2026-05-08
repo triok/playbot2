@@ -26,6 +26,7 @@ import { WebSocketServer } from "ws";
 import { UserPolymarketWebsocket } from './services/UserPolymarketWebsocket.js';
 import { RtdsPolymarketWebsocket } from './services/rtdsPolymarketWebsocket.js';
 import { ChainlinkWebSocket } from './services/ChainlinkWebsocket.js';
+import { BinanceWebSocket } from './services/BinanceWebsocket.js';
 import { getClobClient } from "./services/clobClient.js";
 import { checkBalance, waitForBalance } from "./services/checkBalance.js";
 import { createBroadcaster } from './services/broadcast.js';
@@ -188,9 +189,9 @@ server.listen(PORT, '0.0.0.0', () => {
     //   getUserActivity('0xe1d6b51521bd4365769199f392f9818661bd907c');  // ← activity слежение
     // }, 60 * 1000);  
 
-    setInterval(() => {
-      getUserActivity('0xFe61Da21eBdf55a8916d0e34205F0cf4989505cd');  // ← мой аккаунт
-    }, 60 * 1000);    
+    // setInterval(() => {
+    //   getUserActivity('0xFe61Da21eBdf55a8916d0e34205F0cf4989505cd');  // ← мой аккаунт
+    // }, 60 * 1000);    
 
     // await getOrder("0xf1c3ae7bb200e9829617fef77bf8b831cd5049803e625afd2f625d0f2876a34f", client); // ← проверка ордера
     // await getMarket("0xbea3e83dbbaee460f8de12195a7580cf961cb1a4f7679c3540145c6f7687b91f", client); // ← проверка маркета
@@ -218,6 +219,20 @@ const chainlinkWS = new ChainlinkWebSocket({
 // Запускаем подключение
 chainlinkWS.connect();
 
+// --- Binance Websocket ---
+const binancekWS = new BinanceWebSocket({
+  broadcast: (message) => {
+    // Отправляем всем подключенным клиентам
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(message));
+      }
+    });
+  }
+});
+
+// Запускаем подключение
+binancekWS.connect();
 
 // --- Websocket frontend ---
 wss.on('connection', async (ws) => {

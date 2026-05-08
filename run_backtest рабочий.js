@@ -19,13 +19,11 @@ const cleanMemory = () => {
   };
 
 // const LOGS_DIR = './data/tests';
-
 // const LOGS_DIR = './data/tests2';
 // const LOGS_DIR = './data/test_real';  
 // const LOGS_DIR = './data/tests_sol'; 
-// const LOGS_DIR = './data/test_one';  
-const LOGS_DIR = './data/market_price_new_chainlink_binance' ;
-// const LOGS_DIR = './data/tests_highinitial';
+const LOGS_DIR = './data/test_one';   
+// const LOGS_DIR = 'tests_highinitial';
 // const LOGS_DIR = './data/market_prices';
 // const LOGS_DIR = './data/market_prices_new_with_chainlink';
 const TEST_MARKET_ID = '0x8bb9e49611afc7814aeea5e4462b72451e929765d757b59c05ede6fe4647aaf6'; 
@@ -351,7 +349,7 @@ function processMockMatching(tickOutcomes, marketId) {
           order.matchedTime = global.VIRTUAL_TIME;
       
           const outName = outcomeNames[order.assetId] || 'Unknown';
-          // matchLog = `💰 ОРДЕР ${order.side} ИСПОЛНЕН: ${fillSize} "${outName}" по $${executionPrice}`;
+          matchLog = `💰 ОРДЕР ${order.side} ИСПОЛНЕН: ${fillSize} "${outName}" по $${executionPrice}`;
         // console.log(matchLog);
           syncOrderStatusWithBot(order.id, "MATCHED", marketId, executionPrice);
           printStatusTable(marketId);
@@ -478,10 +476,6 @@ async function runSingleBacktestOdin(marketId, realClient, botInstance) {
       marketInfo.tokens.forEach(t => outcomeNames[t.token_id] = t.outcome);
       const resolvedWinner = marketInfo.tokens.find(t => t.winner)?.outcome;
       
-      if(resolvedWinner == undefined){
-        console.log(`⏩ Пропуск ${marketId}: winner не найден`);
-        return null; 
-      }
       testBot.onSignal = (s) => { 
         // ✅ ФИЛЬТР: Игнорируем логи ожидания, чтобы не засорять историю
         if (s.type === 'bidding' && !s.text.includes('Ждём') && !s.text.includes('waiting')) {
@@ -493,7 +487,7 @@ async function runSingleBacktestOdin(marketId, realClient, botInstance) {
       const allLines = fs.readFileSync(filePath, 'utf-8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
       let metaRow = allLines.find(l => l.meta);
       if (metaRow) {
-        metaRow = { ...metaRow, outcomeNames, winner: resolvedWinner };
+        metaRow = { ...metaRow, outcomeNames };
         currentMarketLog.push(metaRow);
       }
       const clobIdFromFile = metaRow?.id || null;
@@ -558,8 +552,6 @@ async function runSingleBacktestOdin(marketId, realClient, botInstance) {
 
       for (const tickData of ticksData) {
 
-        const marketType = detectMarketType(ticksData);
-        const marketDurationMs = ticksData[ticksData.length - 1].ts - ticksData[0].ts;
         lastAction = null; 
 
         global.VIRTUAL_TIME = tickData.ts;
@@ -584,8 +576,8 @@ async function runSingleBacktestOdin(marketId, realClient, botInstance) {
 
         if (!opp) {
           opp = {
-            id: marketId, conditionId: marketId, arbitrage: true, marketType,
-            rawEndDate: new Date(ticksData[ticksData.length - 1].ts).toISOString(),
+            id: marketId, conditionId: marketId, arbitrage: true, marketType: '15M',
+            rawEndDate: new Date(tickData.ts + 15 * 60 * 1000).toISOString(),
             keyword: keyword,
             clPrice: tickData.clPrice,
             priceToBet: priceTobet,
@@ -717,48 +709,16 @@ async function runSingleBacktestOdin(marketId, realClient, botInstance) {
         }        
       }
   
-      // --- PNL с учётом SELL ордеров ---
-      // totalInvested = все деньги потраченные на BUY (по всем исходам)
-      // realizedProceeds = выручка от SELL ордеров (MATCHED)
-      // Оставшиеся позиции (BUY без SELL) считаем как раньше через resolvedWinner
-      let totalInvested = 0;
-      let realizedProceeds = 0;
-      // Позиции после всех операций (BUY и SELL)
-      const netPositions = {}; // assetId -> { shares, avgPrice }
-
-      for (const order of Object.values(mockOrders)) {
-        if (order.status !== "MATCHED") continue;
-        const assetId = order.assetId;
-        if (!netPositions[assetId]) netPositions[assetId] = { shares: 0, avgPrice: 0 };
-        const pos = netPositions[assetId];
-
-        if (!order.side || order.side === 'BUY') {
-          const cost = order.price * order.matchedSize;
-          totalInvested += cost;
-          const oldValue = pos.shares * pos.avgPrice;
-          pos.shares += order.matchedSize;
-          pos.avgPrice = pos.shares > 0 ? (oldValue + cost) / pos.shares : 0;
-        } else if (order.side === 'SELL') {
-          realizedProceeds += order.price * order.matchedSize;
-          const sellShares = Math.min(order.matchedSize, pos.shares);
-          pos.shares -= sellShares;
-          if (pos.shares <= 0) { pos.shares = 0; pos.avgPrice = 0; }
-        }
-      }
-
+      const finalPos = await mockGetUserPositionsFn(opp?.outcomes || []);
+      const totalInvested = finalPos.reduce((sum, p) => sum + p.initialValue, 0);
+      
       if (totalInvested === 0) return null; // Не входили в сделку — не пишем в отчет
-
-      // Выплата за оставшиеся открытые позиции (если resolvedWinner выиграл)
-      let openPayout = 0;
-      for (const [assetId, pos] of Object.entries(netPositions)) {
-        if (pos.shares > 0 && outcomeNames[assetId] === resolvedWinner) {
-          openPayout += pos.shares; // каждая шара стоит $1 при победе
-        }
-      }
-
-      const pnl = realizedProceeds + openPayout - totalInvested;
+  
+      const winPos = finalPos.find(p => p.outcome === resolvedWinner);
+      const payout = winPos ? winPos.size : 0;
+      const pnl = payout - totalInvested;
       const coin = opp.keyword;
-
+  
       trainingLog.winner = resolvedWinner;
 
       // ПОСЛЕ ЗАВЕРШЕНИЯ: Сохраняем файл
@@ -882,42 +842,14 @@ async function runSingleBacktestVse(marketId, realClient, config, marketInfoCach
           }
       
 
-          // --- PNL с учётом SELL ордеров ---
-          let totalInvested = 0;
-          let realizedProceeds = 0;
-          const netPositions = {}; // assetId -> { shares, avgPrice }
-
-          for (const order of Object.values(mockOrders)) {
-            if (order.status !== "MATCHED") continue;
-            const assetId = order.assetId;
-            if (!netPositions[assetId]) netPositions[assetId] = { shares: 0, avgPrice: 0 };
-            const pos = netPositions[assetId];
-
-            if (!order.side || order.side === 'BUY') {
-              const cost = order.price * order.matchedSize;
-              totalInvested += cost;
-              const oldValue = pos.shares * pos.avgPrice;
-              pos.shares += order.matchedSize;
-              pos.avgPrice = pos.shares > 0 ? (oldValue + cost) / pos.shares : 0;
-            } else if (order.side === 'SELL') {
-              realizedProceeds += order.price * order.matchedSize;
-              const sellShares = Math.min(order.matchedSize, pos.shares);
-              pos.shares -= sellShares;
-              if (pos.shares <= 0) { pos.shares = 0; pos.avgPrice = 0; }
-            }
-          }
-
+          const finalPos = await mockGetUserPositionsFn(opp?.outcomes || []);
+          const totalInvested = finalPos.reduce((sum, p) => sum + p.initialValue, 0);
+          
           if (totalInvested === 0) return null; // Не входили в сделку — не пишем в отчет
-
-          // Выплата за оставшиеся открытые позиции
-          let openPayout = 0;
-          for (const [assetId, pos] of Object.entries(netPositions)) {
-            if (pos.shares > 0 && outcomeNames[assetId] === resolvedWinner) {
-              openPayout += pos.shares;
-            }
-          }
-
-          const pnl = realizedProceeds + openPayout - totalInvested;
+      
+          const winPos = finalPos.find(p => p.outcome === resolvedWinner);
+          const payout = winPos ? winPos.size : 0;
+          const pnl = payout - totalInvested;
           marketStates.delete(marketId); 
           return { 
             marketId, 
@@ -982,23 +914,24 @@ if(test_type == '1 progon'){
             // MID_PIVOT_TARGET_PROFIT: 0.95,
             // MID_TREND_PRICE_MAX: 0.72,  
             // ENDGAME_BREAKOUT_TARGET: 5,  
-            // MID_TREND_BUY_AMOUNT: 1.35,
+            // MID_TREND_BUY_AMOUNT: 1.35
 
             PHASE_START_END_SEC: 600,
             PHASE_START_END_SEC_5M: 290,
-            PHASE_START_END_SEC_1H: 2100,
-            PHASE_ENDGAME_START_SEC: 80,
+            PHASE_START_END_SEC_1H: 3400,
+            PHASE_ENDGAME_START_SEC: 320,
             PHASE_ENDGAME_START_SEC_5M: 90,
-            PHASE_ENDGAME_START_SEC_1H: 540,
+            PHASE_ENDGAME_START_SEC_1H: 900,
             GLOBAL_MAX_MARKET_BUDGET: 155,
             GLOBAL_MIN_ORDER_AMOUNT: 1.10,
-            GLOBAL_RF_MIN_PROFIT_PCT: 0.09,
-            GLOBAL_MAX_WINNER_PCT: 0.55,
+            GLOBAL_RF_MIN_PROFIT_PCT: 0.05,
+            GLOBAL_MAX_WINNER_PCT: 0.45,
             START_AVG_TARGET_DROP: 0.015,
             START_PIVOT_PRICE_MIN: 0.51,
             MID_PIVOT_PRICE_MIN: 0.50,
             MID_PIVOT_TARGET_PROFIT: 0.85,
             MID_TREND_PRICE_MAX: 0.62,  
+            // ENDGAME_BREAKOUT_TARGET: 1.69, 
             ENDGAME_BREAKOUT_TARGET: 0.96, 
             MID_TREND_BUY_AMOUNT: 1.15             
           };
@@ -1902,12 +1835,4 @@ function markOrderAsRejected(order) {
     order.isRejected = true;
     // Бот узнает об отмене ровно через 12 секунд после того, как попытался его выставить (order.ts)
     order.cancelNotifyTime = order.ts + LATENCY_CANCEL_NOTIFY_MS; 
-}
-
-function detectMarketType(ticksData) {
-  const durationMs = ticksData[ticksData.length - 1].ts - ticksData[0].ts;
-  const durationMin = durationMs / 60000;
-  if (durationMin < 8)       return '5M';
-  if (durationMin < 20)      return '15M';
-  return '1H';
 }

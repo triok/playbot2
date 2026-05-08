@@ -62,13 +62,18 @@ export default function App() {
       addLog('No opportunities received.', 'warning');
       return;
     }
-  
+
+    // 🛡️ ОЧИСТКА ОТ ДУБЛИКАТОВ: оставляем только уникальные по id / conditionId
+    const uniqueResults = Array.from(
+      new Map(results.map(opp => [opp.id || opp.conditionId, opp])).values()
+    );
+
     addLog(
       `Received ${results.length} opportunities from server.`,
       'success'
     );
   
-    setOpportunities(results);
+    setOpportunities(uniqueResults);
   }, []);
 
   // нужные
@@ -576,8 +581,15 @@ export default function App() {
     
       if (!winningPos) return;
     
-      const payout = Number(winningPos.size || 0);
-      const pnl = payout - totalInvested;
+      // const payout = Number(winningPos.size || 0);
+      // const pnl = payout - totalInvested;
+
+      const totalSellProceeds = lastSnapshot.positions.reduce(
+        (sum, p) => sum + Number(p.sellProceeds || 0), 0
+      );
+      const payout = Number(winningPos.size || 0); // оставшиеся шары победившего исхода
+      const pnl = totalSellProceeds + payout - totalInvested;      
+      
       const pnlPercent = (pnl / totalInvested) * 100;
 
       
@@ -1262,7 +1274,7 @@ export default function App() {
                         </span>                                              
                         [{opp.marketType}] {opp.title} | NegRisk:{" "} 
                         <span className={opp.negRisk ? "text-yellow-400" : "text-green-400"}>
-                          {opp.negRisk ? 1 : 0} | {opp.id}
+                          {opp.negRisk ? 1 : 0} | {opp.id} 
                         </span>
                       </h3>
 
@@ -1348,7 +1360,11 @@ export default function App() {
                     </div>
                     
                   </div>
+
+                  <p className="text-xs text-slate-500 mb-3 leading-tight">{opp.conditionId}</p>
+                  
                   {/* Подзаголовок — групповое описание */}
+                   
                   {opp.groupTitle && (
                     <p className="text-xs text-slate-500 mb-3 leading-tight">
                       {opp.groupTitle} | {opp.sportsMarketType}

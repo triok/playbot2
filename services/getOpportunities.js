@@ -1,268 +1,199 @@
-import { isCryptoMarket, CRYPTO_KEYWORDS, formatMoscowDateTime, STOP_WORDS, ALLOWED_TAGS, STOP_TAGS} from "./utils.js"; 
+import { isCryptoMarket, CRYPTO_KEYWORDS, formatMoscowDateTime, STOP_WORDS, ALLOWED_TAGS, STOP_TAGS } from "./utils.js";
 
-export async function getOpportunities({
-  // maxTimeHours = 20 / 60
-  // 80 / 60   80 минут, 1:20
-  // maxTimeHours = 80 / 60
-  maxTimeHours = 1
-  // maxTimeHours = 0.25
-} = {}) {
+// ============================================================
+// 🔧 СЦЕНАРИИ — раскомментируй нужный, остальные закомментируй
+// ============================================================
+const SCENARIO = 'crypto';   // 1️⃣ Только крипто маркеты 5M/15M/1H
+// const SCENARIO = 'sports';   // 2️⃣ Soccer / Basketball / Tennis
+// const SCENARIO = 'esports';  // 3️⃣ LoL / Dota / CS2 / Valorant / Honor
+// ============================================================
 
-  const now = new Date();
-  const future = new Date(now.getTime() + maxTimeHours * 60 * 60 * 1000);
+const CRYPTO_KEYWORDS_LIST = ['bitcoin', 'ethereum', 'solana', 'xrp', '(AAPL)', '(TSLA)', '(GOOGL)', '(NVDA)', '(MSFT)', '(AMZN)', '(PLTR)', 'Microsoft'];
+// const CRYPTO_MARKET_TYPES  = ['5M', '15M', '1H']; 
+const CRYPTO_MARKET_TYPES  = ['15M', '1H']; 
 
-  const BATCH_SIZE = 100;
-  const TOTAL_MARKETS_NEEDED = 1000;
-  const MAX_OFFSET = TOTAL_MARKETS_NEEDED;
+const SPORTS_TAGS          = ['soccer', 'tennis', 'basketball', 'baseball'];
+const SPORTS_STOP_TYPES    = ['first_half_spreads', 'first_half_totals', 'first_half_moneyline', 'points', 'rebounds', 'assists', ''];
+
+const ESPORTS_KEYWORDS     = ['lol', 'dota', 'honor', 'Counter-Strike', 'cs2', 'valorant'];
+
+export async function getOpportunities() {
+  const now    = new Date();
+  const WINDOW = SCENARIO === 'crypto' ? 2 : 4; // часов
+  const future = new Date(now.getTime() + WINDOW * 60 * 60 * 1000);
+
+  // --- Загрузка событий ---
+  const BATCH_SIZE   = 100;
+  const MAX_OFFSET   = 2000;
   const POLYMARKET_EVENT_URL = process.env.POLYMARKET_EVENT_URL;
 
   let allEvents = [];
   let offset = 0;
-  let hasMore = true;
-  console.log(`[GET OPPORTUNITIES] Fetching opportunities from Polymarket...`);
+
+  console.log(`[GET OPPORTUNITIES] Scenario: ${SCENARIO}`);
 
   while (offset <= MAX_OFFSET) {
-    // while (hasMore) {
     const params = new URLSearchParams({
-      limit: BATCH_SIZE.toString(),
-      offset: offset.toString(),
-      active: 'true',
-      closed: 'false',
-      order: 'endDate',
+      limit:     BATCH_SIZE.toString(),
+      offset:    offset.toString(),
+      active:    'true',
+      closed:    'false',
+      order:     'endDate',
       ascending: 'true',
     });
 
-    const url = `${POLYMARKET_EVENT_URL}?${params.toString()}`;
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      throw new Error(`[GET OPPORTUNITIES] Polymarket API Error: ${response.statusText}`);
-    }
+    const response = await fetch(`${POLYMARKET_EVENT_URL}?${params}`);
+    if (!response.ok) throw new Error(`Polymarket API Error: ${response.statusText}`);
 
     const events = await response.json();
     if (!events.length) break;
 
     allEvents.push(...events);
     offset += BATCH_SIZE;
-
-    // console.log(`     Fetched ${allEvents.length} events...`);
-
-    // Если последний батч меньше запрошенного — конец данных
-    if (events.length < BATCH_SIZE) {
-      hasMore = false;
-      break;
-    }
+    if (events.length < BATCH_SIZE) break;
 
     await new Promise(r => setTimeout(r, 150));
-
-    // if (allEvents.length >= TOTAL_MARKETS_NEEDED) break;
-    // await new Promise(r => setTimeout(r, 150));
   }
 
+  // --- Фильтрация ---
   const opportunities = [];
 
   for (const event of allEvents) {
-    if (!event.markets) continue;
-    if (event.ended) continue;
+    console.log(event.slug);
+    if (!event.markets || event.ended) continue;
+
     for (const market of event.markets) {
-      
       if (!market.outcomePrices || !market.outcomes) continue;
+      if (!market.acceptingOrders) continue;
 
+      // Парсинг цен и исходов
       let prices, outcomes;
-
       try {
-        prices = typeof market.outcomePrices === 'string'
-          ? JSON.parse(market.outcomePrices).map(Number)
-          : market.outcomePrices.map(Number);
-
-        outcomes = typeof market.outcomes === 'string'
-          ? JSON.parse(market.outcomes)
-          : market.outcomes;
-      } catch {
-        continue;
-      }
+        prices   = (typeof market.outcomePrices === 'string' ? JSON.parse(market.outcomePrices) : market.outcomePrices).map(Number);
+        outcomes = typeof market.outcomes === 'string' ? JSON.parse(market.outcomes) : market.outcomes;
+      } catch { continue; }
 
       if (prices.length !== outcomes.length) continue;
 
-      // const endDate = new Date(market.endDate || event.endDate);
-
-      // const isEndingSoon = endDate > now && endDate <= future;
-      // const isLiveNow = event.live === true;
-      // const hasVolume = Number(market.volume) > 500;
-      
-      // if (!(isEndingSoon || isLiveNow) || !hasVolume) continue;
-
-      // if (endDate <= now || endDate > future) continue;
-
-      const endDate = new Date(market.endDate || event.endDate);
-
-      const isEndingSoon = endDate > now && endDate <= future;
-      const isLiveNow = event.live === true;
-      
-      const isAcceptingOrders = market.acceptingOrders === true;
-      const hasRecentVolume = Number(market.volume24hrClob || 0) > 1000;
-      // const tightSpread = Number(market.spread || 1) <= 0.02;
-      
-      if (endDate <= now) continue; // убирает события которые уже закончились, временный фильтр для тестов
-
-      // Основной фильтр
-      if (!isAcceptingOrders) continue;
-      
-      if (!(isEndingSoon || isLiveNow || hasRecentVolume)) continue;
-      
-      // if (!tightSpread) continue;
-
-
-      // 🔴 ФИЛЬТР СТОП-СЛОВ — добавьте ЭТО в начало цикла
-      if (containsStopWord(event.title, STOP_WORDS)) {
-        continue; // ❌ Пропускаем событие с запрещённым словом
-      }
-
       let tokenIds;
-      try {
-        tokenIds = JSON.parse(market.clobTokenIds);
-      } catch {
-        continue;
-      }
+      try { tokenIds = JSON.parse(market.clobTokenIds); } catch { continue; }
 
+      const endDate  = new Date(market.endDate || event.endDate);
+      if (endDate <= now) continue;
+
+      const isLiveNow      = event.live === true;
+      const isEndingSoon   = endDate <= future;
+      const eventTagSlugs  = event.tags?.map(t => t.slug) || [];
+console.log(event.title, eventTagSlugs);
+      // Стоп-теги и стоп-слова (глобально для всех сценариев)
+      if (STOP_TAGS.some(s => eventTagSlugs.includes(s))) continue;
+      if (containsStopWord(event.title, STOP_WORDS)) continue;
+
+      // Определяем marketType из тегов
+      const marketType = ALLOWED_TAGS.find(tag => eventTagSlugs.includes(tag)) || '';
+
+      // Сборка opp
       const outcomesData = outcomes.map((name, i) => ({
         name,
-        price: prices[i],
+        price:   prices[i],
         assetId: tokenIds[i],
       }));
 
-      const bestOutcome = outcomesData.reduce((a, b) =>
-        b.price > a.price ? b : a
-      );
-
-      const foundKeyword = CRYPTO_KEYWORDS.find(keyword =>
-        event.title.toLowerCase().includes(keyword.toLowerCase())
-      );  
-      
-      let marketType = '';
-      // if (event.slug.includes('-15m-')) {
-      //   marketType = '15m';
-      // }
-
-      // Получаем все slug'и тегов события
-      const eventTagSlugs = event.tags?.map(tag => tag.slug) || [];
-
-      // Проверяем, есть ли хотя бы один разрешённый тег
-      const hasAllowedTag = eventTagSlugs.some(slug => 
-        ALLOWED_TAGS.includes(slug)
-      );
-
-      const foundTag = eventTagSlugs.find(slug => ALLOWED_TAGS.includes(slug));
-
-      if (foundTag) {
-        // console.log(`Найден разрешённый тег: ${foundTag}`); // например, "soccer"
-        marketType = foundTag;
-      }
-
-      // проверка на запрещенные теги
-      const hasStopTag = eventTagSlugs.some(slug => 
-        STOP_TAGS.includes(slug)
-      );
-
-      let startDate;
-      if(market.gameStartTime){
-        startDate = formatMoscowDateTime(market.gameStartTime);
-      }
-      if(foundKeyword == 'lol' || foundKeyword == 'dota' || foundKeyword == 'Counter-Strike' || foundKeyword == 'honor' || foundKeyword == 'valorant'){
-        startDate = formatMoscowDateTime(market.gameStartTime);
-        // if(!market.groupItemTitle.toLowerCase().includes('winner') && !market.groupItemTitle.toLowerCase().includes('moneyline')){
-        //   continue;
-        // }
-      } else {
-        // const thisMarketmaxTimeHours = 1;
-        // const thisMarketfuture = new Date(now.getTime() + thisMarketmaxTimeHours * 60 * 60 * 1000); 
-        // const thisMarketendDate = new Date(market.endDate || event.endDate);
-        // if (thisMarketendDate <= now || thisMarketendDate > thisMarketfuture) continue;        
-
-      } 
-
+      const bestOutcome  = outcomesData.reduce((a, b) => b.price > a.price ? b : a);
+      const foundKeyword = CRYPTO_KEYWORDS.find(kw => event.title.toLowerCase().includes(kw.toLowerCase()));
 
       const opp = {
-        id: market.id,
-        conditionId: market.conditionId,
-        title: event.title,
-        tooltipTitle: market.question,
-        groupTitle: market.groupItemTitle,
+        id:              market.id,
+        conditionId:     market.conditionId,
+        title:           event.title,
+        tooltipTitle:    market.question,
+        groupTitle:      market.groupItemTitle,
         sportsMarketType: market.sportsMarketType,
-        outcomes: outcomesData,
-        bestOutcome: bestOutcome.name,
+        outcomes:        outcomesData,
+        bestOutcome:     bestOutcome.name,
         profitPotential: (1 - Math.min(...prices)) * 100,
-        timeLeft: getTimeDifference(endDate),
-        orderMinSize: market.orderMinSize,
+        timeLeft:        getTimeDifference(endDate),
+        orderMinSize:    market.orderMinSize,
         orderPriceMinTickSize: market.orderPriceMinTickSize,
-        tickSizeBuy: market.orderPriceMinTickSize,
-        tickSizeSell: market.orderPriceMinTickSize,
-        rawEndDate: endDate,
-        volume: market.volume,
-        slug: event.slug,
-        negRisk: market.negRisk,
-        keyword: foundKeyword,
-        marketType: marketType,
-        live: event.live || null,
-        startTime: startDate,
-        takerFeeBps: market.takerBaseFee ?? 1000
+        tickSizeBuy:     market.orderPriceMinTickSize,
+        tickSizeSell:    market.orderPriceMinTickSize,
+        rawEndDate:      endDate,
+        volume:          market.volume,
+        slug:            event.slug,
+        negRisk:         market.negRisk,
+        keyword:         foundKeyword,
+        marketType:      marketType,
+        live:            event.live || null,
+        startTime:       market.gameStartTime ? formatMoscowDateTime(market.gameStartTime) : undefined,
+        takerFeeBps:     market.takerBaseFee ?? 1000,
       };
-      // if(event.live){
-      //   console.log(event);
-      // }
 
-      // ФИЛЬТР Стоп теги
-      if (hasStopTag) {
-          continue;   // ❌ пропускаем
-      }
-      // 🧠 ФИЛЬТР КРИПТО      
-      if (!isCryptoMarket(opp) && !hasAllowedTag) {
-        continue;   // ❌ НЕ крипта — пропускаем
-      }     
+      // ════════════════════════════════════════════
+      // СЦЕНАРИЙ 1: КРИПТО (5M / 15M / 1H)
+      // ════════════════════════════════════════════
+      if (SCENARIO === 'crypto') {
+        // Только крипто-ключевые слова
+        if (!CRYPTO_KEYWORDS_LIST.some(kw => event.title.toLowerCase().includes(kw.toLowerCase()))) continue;
+        // Только нужные типы маркетов
+        if (!CRYPTO_MARKET_TYPES.includes(marketType)) continue;
+        // Закрываются в течение 2 часов
+        if (!isEndingSoon) continue;
 
-      // if((opp.marketType == '5M' && opp.keyword == 'bitcoin' || opp.marketType == '5M' && opp.keyword == 'ethereum') || opp.marketType == '15M' || opp.marketType == '1H'){ // часовые и 5 мин
-        if(opp.marketType == '15M'){
-        opportunities.push(opp);  
+        opportunities.push(opp);
+        continue;
       }
 
-      // подключить соккер
-      // if(startDate != undefined){
-      //   console.log(startDate);
-      //   const gameStart = new Date(market.gameStartTime);
-      //   const fourHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000);        
-      //   if (gameStart <= fourHoursLater && gameStart.getTime() + 2 * 60 * 60 * 1000 >= now.getTime()) {
-      //     console.log('added');
-      //     opportunities.push(opp);
-      //   }
+      // ════════════════════════════════════════════
+      // СЦЕНАРИЙ 2: СПОРТ (Soccer / Basketball / Tennis)
+      // ════════════════════════════════════════════
+      if (SCENARIO === 'sports') {
+        // Только спортивные теги
+        if (!SPORTS_TAGS.includes(marketType)) continue;
 
-      // }      
-      // opportunities.push(opp);  
+        // Отсеиваем ненужные типы ставок
+        if (SPORTS_STOP_TYPES.includes(opp.sportsMarketType)) continue;
+
+        // Либо live, либо игра начнётся в течение 4 часов
+        const gameStart = market.gameStartTime ? new Date(market.gameStartTime) : null;
+        const startsWithin4h = gameStart && gameStart <= future && gameStart >= now;
+        if (!isLiveNow && !startsWithin4h) continue;
+
+        opportunities.push(opp);
+        continue;
+      }
+
+      // ════════════════════════════════════════════
+      // СЦЕНАРИЙ 3: КИБЕРСПОРТ
+      // ════════════════════════════════════════════
+      if (SCENARIO === 'esports') {
+        // Только esports-ключевые слова
+        if (!ESPORTS_KEYWORDS.some(kw => event.title.toLowerCase().includes(kw.toLowerCase()))) continue;
+
+        // Либо live, либо начнётся в течение 4 часов
+        const gameStart = market.gameStartTime ? new Date(market.gameStartTime) : null;
+        const startsWithin4h = gameStart && gameStart <= future && gameStart >= now;
+        if (!isLiveNow && !startsWithin4h) continue;
+
+        opportunities.push(opp);
+        continue;
+      }
     }
   }
-  
-    console.log(`[GET OPPORTUNITIES] Found ${opportunities.length} opportunities`);
-    // if (opportunities.length > 0) {
-    //   // return [opportunities[0]];
-    //   return opportunities.slice(0, 14);
-    // }
-    // return [];
-    return opportunities;
+
+  console.log(`[GET OPPORTUNITIES] Found ${opportunities.length} opportunities`);
+  return opportunities;
 }
 
 function getTimeDifference(endDate) {
-  const now = new Date();
+  const now    = new Date();
   const diffMs = endDate.getTime() - now.getTime();
-  
   if (diffMs <= 0) return "Ending now";
-
-  const hours = Math.floor(diffMs / (1000 * 60 * 60));
+  const hours   = Math.floor(diffMs / (1000 * 60 * 60));
   const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-  
   return `${hours}h ${minutes}m`;
 }
 
 export function containsStopWord(title, stopWords) {
-  const lowerTitle = title.toLowerCase();
-  return stopWords.some(word => lowerTitle.includes(word.toLowerCase()));
+  const lower = title.toLowerCase();
+  return stopWords.some(w => lower.includes(w.toLowerCase()));
 }
-

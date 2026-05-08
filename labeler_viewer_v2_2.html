@@ -1,0 +1,1265 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Market Viewer V2</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg:        #0a0c10;
+    --surface:   #111318;
+    --border:    #1e2230;
+    --entry:     #38bdf8;
+    --hedge:     #f472b6;
+    --green:     #4ade80;
+    --red:       #f87171;
+    --yellow:    #fbbf24;
+    --muted:     #4b5563;
+    --text:      #e2e8f0;
+    --text-dim:  #64748b;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    min-height: 100vh;
+    padding: 24px;
+  }
+
+  h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+
+  h2 {
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 14px;
+  }
+
+  /* ── UPLOAD ZONE ── */
+  #upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 48px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    margin-bottom: 28px;
+  }
+  #upload-zone:hover, #upload-zone.drag { border-color: var(--entry); background: #111a26; }
+  #upload-zone p { color: var(--text-dim); margin-top: 8px; font-size: 12px; }
+  #upload-zone input { display: none; }
+  .upload-icon { font-size: 36px; margin-bottom: 8px; }
+  .upload-title { font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 700; color: var(--text); }
+
+  /* ── HEADER INFO ── */
+  #info { display: none; margin-bottom: 20px; }
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .info-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+  }
+  .info-card .label { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .info-card .value { font-size: 14px; font-weight: 600; word-break: break-word; }
+  .info-card .value.desc { font-size: 11px; color: var(--text-dim); line-height: 1.4; }
+
+  /* ── CHART ── */
+  #chart-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 20px;
+    position: relative;
+  }
+  canvas { display: block; width: 100%; }
+
+  /* ── TOOLTIP ── */
+  #tooltip {
+    position: fixed;
+    background: #1a1f2e;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    pointer-events: none;
+    display: none;
+    z-index: 100;
+    min-width: 200px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  }
+  #tooltip .tt-title { font-family: 'Syne', sans-serif; font-weight: 700; margin-bottom: 6px; font-size: 13px; }
+  #tooltip .tt-row { display: flex; justify-content: space-between; gap: 16px; color: var(--text-dim); margin: 2px 0; }
+  #tooltip .tt-row span:last-child { color: var(--text); font-weight: 600; }
+
+  /* ── LEGEND ── */
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    margin-bottom: 8px;
+  }
+  .legend-item {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--text-dim);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    transition: all 0.15s;
+  }
+  .legend-item:hover { background: #1a1f2e; }
+  .legend-item.disabled { opacity: 0.4; }
+  .legend-item.disabled .legend-line,
+  .legend-item.disabled .legend-dot { opacity: 0.3; }
+  .legend-item input { display: none; }
+  .legend-item.active { border-color: var(--border); background: #111a26; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .legend-line { width: 20px; height: 2px; flex-shrink: 0; }
+
+  /* ── SPREAD CHART ── */
+  #spread-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+
+  /* ── STATS TABLE ── */
+  #stats-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  #position-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+  }
+  .stat-box {
+    background: #0d0f14;
+    border-radius: 6px;
+    padding: 10px 12px;
+  }
+  .stat-box .label { color: var(--text-dim); font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .stat-box .value { font-size: 16px; font-weight: 700; }
+  .stat-box .value.pos { color: var(--green); }
+  .stat-box .value.neg { color: var(--red); }
+  .stat-box .value.neutral { color: var(--yellow); }
+
+  .position-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  .position-card {
+    background: #0d0f14;
+    border-radius: 6px;
+    padding: 12px;
+  }
+  .position-card.outcome1 { border-left: 3px solid var(--entry); }
+  .position-card.outcome2 { border-left: 3px solid var(--hedge); }
+  .position-card .label { color: var(--text-dim); font-size: 9px; text-transform: uppercase; margin-bottom: 6px; }
+  .position-card .shares { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .position-card .invested { font-size: 11px; color: var(--text-dim); margin-bottom: 10px; }
+  .position-card .pnl-row { display: flex; justify-content: space-between; font-size: 11px; padding: 3px 0; }
+  .position-card .pnl-row .label { font-size: 10px; color: var(--text-dim); }
+  .position-card .pnl-pos { color: var(--green); }
+  .position-card .pnl-neg { color: var(--red); }
+
+  /* ── BACK BUTTON ── */
+  .back-btn {
+    display: none;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    margin-bottom: 12px;
+  }
+  .back-btn:hover { border-color: var(--text); color: var(--text); }
+  .back-btn.visible { display: inline-block; }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+</style>
+</head>
+<body>
+
+<h1>📊 Market Viewer V2</h1>
+<p style="color:var(--text-dim);margin-bottom:20px;font-size:12px;">Загрузи JSONL файл маркета (drag & drop или кликни для выбора файла)</p>
+
+<button class="back-btn" id="back-btn" onclick="resetViewer()">← Загрузить другой файл</button>
+
+<div id="upload-zone" onclick="document.getElementById('file-input').click()">
+  <div class="upload-icon">📂</div>
+  <div class="upload-title">Перетащи файл или нажми чтобы выбрать</div>
+  <p>*.jsonl файл из папки data/market_prices</p>
+  <input type="file" id="file-input" accept=".jsonl,.json">
+</div>
+
+<div id="info">
+  <div class="info-grid" id="info-grid"></div>
+
+  <div id="chart-wrap">
+    <h2>Цены исходов</h2>
+    <div class="legend" id="legend">
+      <div class="legend-item active" data-layer="p1" onclick="toggleLayer('p1', this)">
+        <div class="legend-line" style="background:#38bdf8"></div><span id="legend-p1">Outcome 1</span>
+      </div>
+      <div class="legend-item active" data-layer="p2" onclick="toggleLayer('p2', this)">
+        <div class="legend-line" style="background:#f472b6"></div><span id="legend-p2">Outcome 2</span>
+      </div>
+      <div class="legend-item active" data-layer="cl" onclick="toggleLayer('cl', this)">
+        <div class="legend-line" style="background:#4ade80;height:0;border-top:2px dashed #4ade80"></div> Chainlink
+      </div>
+      <div class="legend-item active" data-layer="binance" onclick="toggleLayer('binance', this)">
+        <div class="legend-line" style="background:#f59e0b;height:0;border-top:2px dashed #f59e0b"></div> Binance
+      </div>      
+      <div class="legend-item active" data-layer="threshold" onclick="toggleLayer('threshold', this)">
+        <div class="legend-line" style="background:#ef4444"></div> Entry Price
+      </div>
+      <div class="legend-item" data-layer="pnl" onclick="toggleLayer('pnl', this)">
+        <div class="legend-line" style="background:#a855f7"></div> PNL
+      </div>
+      <div class="legend-item active" data-layer="actions" onclick="toggleLayer('actions', this)">
+        <div class="legend-dot" style="background:#fbbf24"></div> Actions
+      </div>
+    </div>
+    <canvas id="price-chart" height="280"></canvas>
+  </div>
+
+  <div id="spread-wrap" style="display:none;">
+    <h2>Спред (spread = |p1 - p2|)</h2>
+    <canvas id="spread-chart" height="150"></canvas>
+  </div>
+
+  <div id="stats-wrap">
+    <h2>Статистика</h2>
+    <div class="stats-grid" id="stats-grid"></div>
+  </div>
+
+  <div id="position-wrap">
+    <h2>Позиция бота</h2>
+    <div class="position-grid" id="position-grid"></div>
+  </div>
+</div>
+
+<div id="tooltip">
+  <div class="tt-title" id="tt-title"></div>
+  <div id="tt-body"></div>
+</div>
+
+<script>
+let pricesGlobal = [];
+let actionsGlobal = [];
+let outcomeNamesGlobal = {};
+let winnerGlobal = null;
+
+// Layer visibility state
+const layers = {
+  p1: true,
+  p2: true,
+  cl: true,
+  threshold: true,
+  actions: true,
+  pnl: false
+};
+
+function toggleLayer(layer, btn) {
+  layers[layer] = !layers[layer];
+  btn.classList.toggle('active', layers[layer]);
+  btn.classList.toggle('disabled', !layers[layer]);
+  const currentEntryPrice = getEntryPriceForCurrentData();
+  drawPriceChart(pricesGlobal, currentEntryPrice);
+}
+
+function getEntryPriceForCurrentData() {
+  if (!pricesGlobal || pricesGlobal.length === 0) return null;
+  for (const p of pricesGlobal) {
+    if (p.clPrice) return p.clPrice;
+  }
+  return null;
+}
+
+function calculateBotPositions() {
+  const pos = {
+    outcome1: { shares: 0, invested: 0, avgPrice: 0 },
+    outcome2: { shares: 0, invested: 0, avgPrice: 0 },
+    totalInvested: 0,
+    realizedProceeds: 0,
+    hasSells: false
+  };
+  if (actionsGlobal.length === 0) return pos;
+  
+  const outcomeNames = Object.values(outcomeNamesGlobal);
+  const name1 = outcomeNames[0] || 'Outcome 1';
+  const name2 = outcomeNames[1] || 'Outcome 2';
+  
+  actionsGlobal.forEach(action => {
+    if ((action.type === 'MATCHED' || action.type === 'FILLED') && action.price && action.size) {
+      const isOutcome1 = action.outcome === name1 || action.outcome === 'Outcome 1' || (action.outcome === '' && !name2);
+      const target = isOutcome1 ? pos.outcome1 : pos.outcome2;
+      const side = action.side || 'BUY';
+      
+      if (side === 'BUY') {
+        const cost = action.price * action.size;
+        const oldValue = target.shares * target.avgPrice;
+        target.shares += action.size;
+        target.invested += cost;
+        pos.totalInvested += cost;
+        target.avgPrice = target.shares > 0 ? (oldValue + cost) / target.shares : 0;
+      } else if (side === 'SELL') {
+        pos.hasSells = true;
+        const sellProceeds = action.price * action.size;
+        pos.realizedProceeds += sellProceeds;
+        if (target.shares > 0) {
+          const sellShares = Math.min(action.size, target.shares);
+          target.invested -= target.avgPrice * sellShares;
+          target.shares -= sellShares;
+          if (target.shares <= 0) {
+            target.invested = 0;
+            target.avgPrice = 0;
+          }
+        }
+      }
+    }
+  });
+  
+  return pos;
+}
+
+function calculatePositionAtTime(targetTs) {
+  const pos = {
+    outcome1: { shares: 0, invested: 0, avgPrice: 0 },
+    outcome2: { shares: 0, invested: 0, avgPrice: 0 },
+    totalInvested: 0,      // cumulative money spent on BUYs
+    realizedProceeds: 0,   // cumulative money received from SELLs
+    hasSells: false        // whether any SELL has been matched by this time
+  };
+  if (actionsGlobal.length === 0 || !targetTs) return pos;
+  
+  const outcomeNames = Object.values(outcomeNamesGlobal);
+  const name1 = outcomeNames[0] || 'Outcome 1';
+  const name2 = outcomeNames[1] || 'Outcome 2';
+  
+  actionsGlobal.forEach(action => {
+    if (action.ts > targetTs) return;
+    if ((action.type === 'MATCHED' || action.type === 'FILLED') && action.price && action.size) {
+      const isOutcome1 = action.outcome === name1 || action.outcome === 'Outcome 1' || (action.outcome === '' && !name2);
+      const target = isOutcome1 ? pos.outcome1 : pos.outcome2;
+      const side = action.side || 'BUY';
+      
+      if (side === 'BUY') {
+        const cost = action.price * action.size;
+        const oldValue = target.shares * target.avgPrice;
+        target.shares += action.size;
+        target.invested += cost;
+        pos.totalInvested += cost;
+        target.avgPrice = target.shares > 0 ? (oldValue + cost) / target.shares : 0;
+      } else if (side === 'SELL') {
+        pos.hasSells = true;
+        const sellProceeds = action.price * action.size;
+        pos.realizedProceeds += sellProceeds;
+        if (target.shares > 0) {
+          const sellShares = Math.min(action.size, target.shares);
+          target.invested -= target.avgPrice * sellShares;
+          target.shares -= sellShares;
+          if (target.shares <= 0) {
+            target.invested = 0;
+            target.avgPrice = 0;
+          }
+        }
+      }
+    }
+  });
+  
+  return pos;
+}
+
+// ── DRAG & DROP ──
+const zone = document.getElementById('upload-zone');
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+zone.addEventListener('drop', e => {
+  e.preventDefault();
+  zone.classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (file) readFile(file);
+});
+document.getElementById('file-input').addEventListener('change', e => {
+  if (e.target.files[0]) readFile(e.target.files[0]);
+});
+
+function readFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const text = e.target.result;
+      const lines = text.trim().split('\n').filter(l => l.trim());
+      
+      const data = {
+        conditionId: file.name.replace('.jsonl', '').replace('.json', ''),
+        prices: []
+      };
+      actionsGlobal = [];
+      outcomeNamesGlobal = {};
+      winnerGlobal = null;
+
+      // Parse JSONL lines
+      for (const line of lines) {
+        try {
+          const obj = JSON.parse(line);
+          // Extract outcome names from meta line
+          if (obj.meta && obj.outcomeNames) {
+            outcomeNamesGlobal = obj.outcomeNames;
+            if (obj.winner) winnerGlobal = obj.winner;
+          }
+          // Skip meta line, keep price data - check if line has outcomes array with price data
+          if (!obj.meta && obj.outcomes && obj.outcomes[0]?.price !== undefined) {
+            data.prices.push({
+              ts: obj.ts,
+              clPrice: obj.clPrice,
+              binancePrice: obj.binancePrice,
+              p1: obj.outcomes[0]?.price || 0,
+              p2: obj.outcomes[1]?.price || 0,
+              size1: obj.outcomes[0]?.size || 0,
+              size2: obj.outcomes[1]?.size || 0
+            });
+          }
+          // Extract actions (ORDER_SENT, MATCHED, etc.)
+          if (!obj.meta && obj.type) {
+            actionsGlobal.push({
+              ts: obj.ts,
+              type: obj.type,
+              side: obj.side,
+              price: parseFloat(obj.price) || 0,
+              size: parseFloat(obj.size) || 0,
+              outcome: obj.outcome,
+              reason: obj.reason || '' 
+            });
+          }
+        } catch(err) {}
+      }
+      
+      if (data.prices.length === 0) {
+        alert('В файле нет данных о ценах');
+        return;
+      }
+      
+      pricesGlobal = data.prices;
+      renderMarket(data);
+    } catch(err) {
+      alert('Ошибка парсинга файла: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function resetViewer() {
+  document.getElementById('upload-zone').style.display = 'block';
+  document.getElementById('info').style.display = 'none';
+  document.getElementById('back-btn').classList.remove('visible');
+  pricesGlobal = [];
+  actionsGlobal = [];
+  outcomeNamesGlobal = {};
+  layers.p1 = true;
+  layers.p2 = true;
+  layers.cl = true;
+  layers.threshold = true;
+  layers.actions = true;
+  layers.pnl = false;
+  document.querySelectorAll('.legend-item').forEach(el => {
+    el.classList.add('active');
+    el.classList.remove('disabled');
+  });
+  document.querySelector('[data-layer="pnl"]').classList.remove('active');
+  document.querySelector('[data-layer="pnl"]').classList.add('disabled');
+}
+
+function renderMarket(data) {
+  document.getElementById('upload-zone').style.display = 'none';
+  document.getElementById('info').style.display = 'block';
+  document.getElementById('back-btn').classList.add('visible');
+  
+  const prices = data.prices;
+  if (prices.length === 0) {
+    alert('Нет данных для отображения');
+    resetViewer();
+    return;
+  }
+  
+  const first = prices[0];
+  const last = prices[prices.length - 1];
+  const minP1 = Math.min(...prices.map(p => p.p1));
+  const maxP1 = Math.max(...prices.map(p => p.p1));
+  const minP2 = Math.min(...prices.map(p => p.p2));
+  const maxP2 = Math.max(...prices.map(p => p.p2));
+  
+  // Try to get market info from file metadata
+  const outcome1 = 'Outcome 1';
+  const outcome2 = 'Outcome 2';
+  const question = data.conditionId;
+  const winner = winnerGlobal || 'Unknown';
+  
+  // Duration
+  const startTime = new Date(prices[0].ts);
+  const endTime = new Date(prices[prices.length - 1].ts);
+  const durationMin = ((endTime - startTime) / 60000).toFixed(1);
+  
+  // Calculate spread stats
+  // Spread = 1 - (p1 + p2) = the "edge" or RF potential
+  // If p1=0.54, p2=0.47, sum=1.01, spread = -0.01 (actually negative = no RF)
+  // If p1=0.55, p2=0.45, sum=1.00, spread = 0 (no edge)
+  // If p1=0.55, p2=0.40, sum=0.95, spread = 0.05 (5% RF potential!)
+  const spreads = prices.map(p => 1 - (p.p1 + p.p2));
+  const avgSpread = spreads.reduce((a,b) => a+b, 0) / spreads.length;
+  const maxSpread = Math.max(...spreads);
+  const minSpread = Math.min(...spreads);
+  
+  // Price change
+  const change1 = first.p1 > 0 ? ((last.p1 - first.p1) / first.p1 * 100) : 0;
+  const change2 = first.p2 > 0 ? ((last.p2 - first.p2) / first.p2 * 100) : 0;
+  
+  // Get outcome names
+  const outcomeNames = Object.values(outcomeNamesGlobal);
+  const name1 = outcomeNames[0] || 'Outcome 1';
+  const name2 = outcomeNames[1] || 'Outcome 2';
+  
+  // Update legend labels
+  const legendP1 = document.getElementById('legend-p1');
+  const legendP2 = document.getElementById('legend-p2');
+  if (legendP1) legendP1.textContent = name1;
+  if (legendP2) legendP2.textContent = name2;
+  
+  // Chainlink price stats
+  const clPrices = prices.map(p => p.clPrice).filter(c => c);
+  const minCL = clPrices.length ? Math.min(...clPrices) : 0;
+  const maxCL = clPrices.length ? Math.max(...clPrices) : 0;
+  const lastCL = clPrices.length ? clPrices[clPrices.length - 1] : 0;
+  const firstCL = clPrices.length ? clPrices[0] : 0;
+  const changeCL = firstCL > 0 ? ((lastCL - firstCL) / firstCL * 100) : 0;
+  
+  document.getElementById('info-grid').innerHTML = `
+    <div class="info-card" style="grid-column: span 2">
+      <div class="label">Condition ID</div>
+      <div class="value desc" style="font-size:10px;color:var(--entry)">${data.conditionId}</div>
+    </div>
+    <div class="info-card">
+      <div class="label">Winner</div>
+      <div class="value">${winner}</div>
+    </div>    
+    <div class="info-card">
+      <div class="label">Время данных</div>
+      <div class="value">${durationMin} мин</div>
+    </div>
+    <div class="info-card">
+      <div class="label">Точек данных</div>
+      <div class="value">${prices.length}</div>
+    </div>
+    <div class="info-card">
+      <div class="label">${name1}</div>
+      <div class="value" style="color:var(--entry)">${last.p1.toFixed(3)} (${change1>=0?'+':''}${change1.toFixed(1)}%)</div>
+    </div>
+    <div class="info-card">
+      <div class="label">${name2}</div>
+      <div class="value" style="color:var(--hedge)">${last.p2.toFixed(3)} (${change2>=0?'+':''}${change2.toFixed(1)}%)</div>
+    </div>
+    ${clPrices.length ? `
+    <div class="info-card">
+      <div class="label">Chainlink Price</div>
+      <div class="value" style="color:var(--green)">$${lastCL.toFixed(6)} (${changeCL>=0?'+':''}${changeCL.toFixed(1)}%)</div>
+    </div>
+    ` : ''}
+  `;
+  
+  // Stats
+  let statsHTML = `
+    <div class="stat-box">
+      <div class="label">${name1} Min</div>
+      <div class="value">${minP1.toFixed(3)}</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">${name1} Max</div>
+      <div class="value">${maxP1.toFixed(3)}</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">${name2} Min</div>
+      <div class="value">${minP2.toFixed(3)}</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">${name2} Max</div>
+      <div class="value">${maxP2.toFixed(3)}</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">Avg Spread</div>
+      <div class="value">${(avgSpread * 100).toFixed(1)}%</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">Max Spread</div>
+      <div class="value">${(maxSpread * 100).toFixed(1)}%</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">Min Spread</div>
+      <div class="value">${(minSpread * 100).toFixed(1)}%</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">RF Points (≥5%)</div>
+      <div class="value" style="color:var(--green)">${spreads.filter(s => s >= 0.05).length}</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">Start Time</div>
+      <div class="value" style="font-size:12px">${startTime.toLocaleTimeString()}</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">End Time</div>
+      <div class="value" style="font-size:12px">${endTime.toLocaleTimeString()}</div>
+    </div>
+  `;
+  
+  if (clPrices.length) {
+    statsHTML += `
+      <div class="stat-box">
+        <div class="label">CL Price Min</div>
+        <div class="value">$${minCL.toFixed(0)}</div>
+      </div>
+      <div class="stat-box">
+        <div class="label">CL Price Max</div>
+        <div class="value">$${maxCL.toFixed(0)}</div>
+      </div>
+    `;
+  }
+  
+  document.getElementById('stats-grid').innerHTML = statsHTML;
+  
+  const botPos = calculateBotPositions();
+  const resolvePrice = 1.00;
+  const totalInv = botPos.totalInvested;
+  
+  let positionHTML = '';
+  if (botPos.hasSells) {
+    const fixedPnl = botPos.realizedProceeds - totalInv;
+    const fixedPct = totalInv > 0 ? (fixedPnl / totalInv) * 100 : 0;
+    const fixedColor = fixedPnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+    
+    const pnlIfRem1Wins = fixedPnl + (resolvePrice * botPos.outcome1.shares);
+    const pnlIfRem2Wins = fixedPnl + (resolvePrice * botPos.outcome2.shares);
+    const rem1Pct = totalInv > 0 ? (pnlIfRem1Wins / totalInv) * 100 : 0;
+    const rem2Pct = totalInv > 0 ? (pnlIfRem2Wins / totalInv) * 100 : 0;
+    
+    positionHTML = `
+      <div class="position-card outcome1" style="grid-column:span 2;border-left:3px solid #4ade80">
+        <div class="label">💰 Фиксированный PNL (после продаж)</div>
+        <div class="shares ${fixedColor}">${fixedPnl >= 0 ? '+' : ''}$${fixedPnl.toFixed(2)}</div>
+        <div class="invested">Вложено всего: $${totalInv.toFixed(2)} | Выручка: $${botPos.realizedProceeds.toFixed(2)}</div>
+        <div class="pnl-row"><span class="label">Доходность</span><span class="${fixedColor}">${fixedPnl >= 0 ? '+' : ''}${fixedPct.toFixed(1)}%</span></div>
+      </div>
+      ${botPos.outcome1.shares > 0 ? `
+      <div class="position-card outcome1">
+        <div class="label">${name1} (остаток)</div>
+        <div class="shares">${botPos.outcome1.shares.toFixed(2)} шар</div>
+        <div class="invested">ср. цена: ${botPos.outcome1.avgPrice.toFixed(3)}</div>
+        <div class="pnl-row"><span class="label">PNL если ${name1} выиграет</span><span class="${pnlIfRem1Wins >= 0 ? 'pnl-pos' : 'pnl-neg'}">${pnlIfRem1Wins >= 0 ? '+' : ''}$${pnlIfRem1Wins.toFixed(2)} (${rem1Pct >= 0 ? '+' : ''}${rem1Pct.toFixed(0)}%)</span></div>
+      </div>` : ''}
+      ${botPos.outcome2.shares > 0 ? `
+      <div class="position-card outcome2">
+        <div class="label">${name2} (остаток)</div>
+        <div class="shares">${botPos.outcome2.shares.toFixed(2)} шар</div>
+        <div class="invested">ср. цена: ${botPos.outcome2.avgPrice.toFixed(3)}</div>
+        <div class="pnl-row"><span class="label">PNL если ${name2} выиграет</span><span class="${pnlIfRem2Wins >= 0 ? 'pnl-pos' : 'pnl-neg'}">${pnlIfRem2Wins >= 0 ? '+' : ''}$${pnlIfRem2Wins.toFixed(2)} (${rem2Pct >= 0 ? '+' : ''}${rem2Pct.toFixed(0)}%)</span></div>
+      </div>` : ''}
+    `;
+  } else {
+    const pnl1 = (botPos.outcome1.shares > 0 && totalInv > 0) ? (resolvePrice * botPos.outcome1.shares) - totalInv : -totalInv;
+    const pnl1Pct = totalInv > 0 ? (pnl1 / totalInv) * 100 : 0;
+    const pnl2 = (botPos.outcome2.shares > 0 && totalInv > 0) ? (resolvePrice * botPos.outcome2.shares) - totalInv : -totalInv;
+    const pnl2Pct = totalInv > 0 ? (pnl2 / totalInv) * 100 : 0;
+    
+    positionHTML = `
+      <div class="position-card outcome1">
+        <div class="label">${name1} wins</div>
+        <div class="shares">${botPos.outcome1.shares.toFixed(2)} шар</div>
+        <div class="invested">Всего вложено: $${totalInv.toFixed(2)}</div>
+        <div class="pnl-row"><span class="label">Цена входа</span><span>${botPos.outcome1.avgPrice.toFixed(3)}</span></div>
+        <div class="pnl-row"><span class="label">PNL →$1</span><span class="${pnl1 >= 0 ? 'pnl-pos' : 'pnl-neg'}">${pnl1 >= 0 ? '+' : ''}$${pnl1.toFixed(2)} (${pnl1Pct >= 0 ? '+' : ''}${pnl1Pct.toFixed(0)}%)</span></div>
+      </div>
+      <div class="position-card outcome2">
+        <div class="label">${name2} wins</div>
+        <div class="shares">${botPos.outcome2.shares.toFixed(2)} шар</div>
+        <div class="invested">Всего вложено: $${totalInv.toFixed(2)}</div>
+        <div class="pnl-row"><span class="label">Цена входа</span><span>${botPos.outcome2.avgPrice.toFixed(3)}</span></div>
+        <div class="pnl-row"><span class="label">PNL →$1</span><span class="${pnl2 >= 0 ? 'pnl-pos' : 'pnl-neg'}">${pnl2 >= 0 ? '+' : ''}$${pnl2.toFixed(2)} (${pnl2Pct >= 0 ? '+' : ''}${pnl2Pct.toFixed(0)}%)</span></div>
+      </div>
+    `;
+  }
+  
+  document.getElementById('position-grid').innerHTML = positionHTML;
+  
+  // Reset layer visibility
+  layers.p1 = true;
+  layers.p2 = true;
+  layers.cl = true;
+  layers.threshold = true;
+  layers.actions = true;
+  layers.pnl = false;
+  document.querySelectorAll('.legend-item').forEach(el => {
+    el.classList.add('active');
+    el.classList.remove('disabled');
+  });
+  
+  const currentEntryPrice = getEntryPriceForCurrentData();
+  drawPriceChart(prices, currentEntryPrice);
+  drawSpreadChart(spreads);
+}
+
+function setupCanvas(id) {
+  const canvas = document.getElementById(id);
+  const wrap = canvas.parentElement;
+  const dpr = window.devicePixelRatio || 1;
+  const w = wrap.clientWidth - 32;
+  const h = parseInt(canvas.getAttribute('height'));
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  return { ctx, w, h };
+}
+
+function drawPriceChart(prices, entryPrice) {
+  const { ctx, w, h } = setupCanvas('price-chart');
+  const PAD = { top: 10, right: 20, bottom: 30, left: 45 };
+  const cw = w - PAD.left - PAD.right;
+  const ch = h - PAD.top - PAD.bottom;
+
+  ctx.clearRect(0, 0, w, h);
+
+  const xOf = i => PAD.left + (i / (prices.length - 1)) * cw;
+  const yOf = v => PAD.top + (1 - v) * ch;
+
+  // Grid
+  ctx.strokeStyle = '#1e2230';
+  ctx.lineWidth = 1;
+  [0, 0.25, 0.5, 0.75, 1].forEach(v => {
+    ctx.beginPath();
+    ctx.moveTo(PAD.left, yOf(v));
+    ctx.lineTo(PAD.left + cw, yOf(v));
+    ctx.stroke();
+    ctx.fillStyle = '#4b5563';
+    ctx.font = '10px JetBrains Mono';
+    ctx.fillText(v.toFixed(2), 2, yOf(v) + 4);
+  });
+
+  // Outcome 1 line
+  if (layers.p1) {
+    ctx.beginPath();
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 2;
+    prices.forEach((p, i) => {
+      i === 0 ? ctx.moveTo(xOf(i), yOf(p.p1)) : ctx.lineTo(xOf(i), yOf(p.p1));
+    });
+    ctx.stroke();
+  }
+
+  // Outcome 2 line
+  if (layers.p2) {
+    ctx.beginPath();
+    ctx.strokeStyle = '#f472b6';
+    ctx.lineWidth = 2;
+    prices.forEach((p, i) => {
+      i === 0 ? ctx.moveTo(xOf(i), yOf(p.p2)) : ctx.lineTo(xOf(i), yOf(p.p2));
+    });
+    ctx.stroke();
+  }
+
+  // Chainlink price line (normalized to 0-1 scale)
+  if (layers.cl) {
+    const clPrices = prices.map(p => p.clPrice).filter(c => c);
+    if (clPrices.length > 0) {
+      const minCL = Math.min(...clPrices);
+      const maxCL = Math.max(...clPrices);
+      const rangeCL = maxCL - minCL || 1;
+      
+      ctx.beginPath();
+      ctx.strokeStyle = '#4ade80';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 3]);
+      prices.forEach((p, i) => {
+        if (p.clPrice) {
+          const normCL = (p.clPrice - minCL) / rangeCL;
+          i === 0 ? ctx.moveTo(xOf(i), yOf(normCL)) : ctx.lineTo(xOf(i), yOf(normCL));
+        }
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // Binance price line
+  if (layers.binance) {
+    const binPrices = prices.map(p => p.binancePrice).filter(c => c);
+    if (binPrices.length > 0) {
+      const minBin = Math.min(...binPrices);
+      const maxBin = Math.max(...binPrices);
+      const rangeBin = maxBin - minBin || 1;
+      ctx.beginPath();
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 3]);
+      prices.forEach((p, i) => {
+        if (p.binancePrice) {
+          const normBin = (p.binancePrice - minBin) / rangeBin;
+          i === 0 ? ctx.moveTo(xOf(i), yOf(normBin)) : ctx.lineTo(xOf(i), yOf(normBin));
+        }
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // Entry price threshold line (normalized to 0-1 scale)
+  if (layers.threshold && entryPrice) {
+    const clPrices = prices.map(p => p.clPrice).filter(c => c);
+    if (clPrices.length > 0) {
+      const minCL = Math.min(...clPrices);
+      const maxCL = Math.max(...clPrices);
+      const rangeCL = maxCL - minCL || 1;
+      const normEntry = (entryPrice - minCL) / rangeCL;
+      
+      // Draw horizontal line at entry price
+      ctx.beginPath();
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 4]);
+      ctx.moveTo(PAD.left, yOf(normEntry));
+      ctx.lineTo(PAD.left + cw, yOf(normEntry));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      
+      // Label
+      ctx.fillStyle = '#ef4444';
+      ctx.font = '10px JetBrains Mono';
+      ctx.fillText(`Entry: $${entryPrice.toFixed(5)}`, PAD.left + 5, yOf(normEntry) - 6);
+    }
+  }
+
+  // X axis (timestamps)
+  ctx.fillStyle = '#4b5563';
+  ctx.font = '10px JetBrains Mono';
+  const step = Math.floor(prices.length / 6);
+  for (let i = 0; i < prices.length; i += step) {
+    const date = new Date(prices[i].ts);
+    ctx.fillText(date.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}), xOf(i) - 20, h - 8);
+  }
+
+// Draw action markers
+  if (actionsGlobal.length > 0 && layers.actions) {
+    drawActionMarkers(ctx, prices, xOf, yOf, w, h, PAD);
+  }
+  
+  // Draw PNL line
+  if (layers.pnl && actionsGlobal.length > 0) {
+    drawPnlLine(ctx, prices, xOf, yOf, w, h, PAD);
+  }
+  
+  // Tooltip
+  const canvas = document.getElementById('price-chart');
+  canvas._prices = prices;
+  canvas._entryPrice = entryPrice;
+  canvas._xOf = xOf;
+  canvas._yOf = yOf;
+  canvas.onmousemove = e => showTooltip(e, canvas, prices, entryPrice, xOf, yOf);
+  canvas.onmouseleave = () => { document.getElementById('tooltip').style.display = 'none'; };
+}
+
+function drawActionMarkers(ctx, prices, xOf, yOf, w, h, PAD) {
+  if (!layers.actions) return;
+  const firstTs = prices[0]?.ts;
+  const lastTs = prices[prices.length - 1]?.ts;
+  const timeRange = lastTs - firstTs;
+
+  if (!firstTs || !timeRange || timeRange <= 0) return;
+
+  const outcomeNames = Object.values(outcomeNamesGlobal);
+  const name1 = outcomeNames[0] || 'Outcome 1';
+  const name2 = outcomeNames[1] || 'Outcome 2';
+
+  actionsGlobal.forEach(action => {
+    const relX = (action.ts - firstTs) / timeRange;
+    const idx = Math.round(relX * (prices.length - 1));
+    if (idx < 0 || idx >= prices.length) return;
+
+    const p = prices[idx];
+    const x = xOf(idx);
+    
+    const actionOutcome = action.outcome || '';
+    const isOutcome1 = actionOutcome === name1 || actionOutcome === 'Outcome 1' || (actionOutcome === '' && !name2);
+    const priceY = isOutcome1 ? p.p1 : p.p2;
+    const y = yOf(priceY);
+    
+    const isSell = action.side === 'SELL';
+    const color = action.type === 'ORDER_SENT'
+      ? (isSell ? '#fb923c' : '#fbbf24')   // orange for SELL sent, yellow for BUY sent
+      : (isSell ? '#ef4444' : '#a855f7');   // red for SELL matched, purple for BUY matched
+    const label = action.type === 'ORDER_SENT'
+      ? (isSell ? '↗' : '📤')
+      : (isSell ? '💵' : '🎯');
+
+    ctx.beginPath();
+    ctx.arc(x, y, 6, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = '#0a0c10';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '8px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, x, y + 3);
+  });
+}
+
+function drawPnlLine(ctx, prices, xOf, yOf, w, h, PAD) {
+  if (!layers.pnl || actionsGlobal.length === 0) return;
+  
+  const firstTs = prices[0]?.ts;
+  if (!firstTs) return;
+  
+  const resolvePrice = 1.00;
+  let maxPnl = -Infinity;
+  let minPnl = Infinity;
+  
+  const pnlValues = [];
+  for (let i = 0; i < prices.length; i++) {
+    const ts = prices[i].ts;
+    const pos = calculatePositionAtTime(ts);
+    const totalInv = pos.totalInvested;
+    
+    let pnl;
+    if (pos.hasSells) {
+      // Fixed realized PNL from sells + best remaining open position upside
+      const fixedPnl = pos.realizedProceeds - totalInv;
+      const rem1 = pos.outcome1.shares > 0 ? fixedPnl + pos.outcome1.shares : fixedPnl;
+      const rem2 = pos.outcome2.shares > 0 ? fixedPnl + pos.outcome2.shares : fixedPnl;
+      pnl = Math.max(rem1, rem2, fixedPnl);
+    } else {
+      const win1 = (pos.outcome1.shares * 1.0) - totalInv;
+      const win2 = (pos.outcome2.shares * 1.0) - totalInv;
+      pnl = Math.max(win1, win2);
+    }
+    pnlValues.push(pnl);
+    if (pnl > maxPnl) maxPnl = pnl;
+    if (pnl < minPnl) minPnl = pnl;
+  }
+  
+  const range = maxPnl - minPnl || 1;
+  const center = (minPnl + maxPnl) / 2;
+  const norm = v => (v - center) / Math.max(Math.abs(minPnl), Math.abs(maxPnl)) * 0.4 + 0.5;
+  
+  ctx.beginPath();
+  ctx.strokeStyle = '#a855f7';
+  ctx.lineWidth = 2;
+  pnlValues.forEach((v, i) => {
+    const y = PAD.top + (1 - norm(v)) * (h - PAD.top - PAD.bottom);
+    i === 0 ? ctx.moveTo(xOf(i), y) : ctx.lineTo(xOf(i), y);
+  });
+  ctx.stroke();
+  
+  ctx.fillStyle = '#a855f7';
+  ctx.font = '10px JetBrains Mono';
+  ctx.fillText(`PNL: $${pnlValues[pnlValues.length - 1].toFixed(2)}`, w - 80, 20);
+}
+
+function drawSpreadChart(spreads) {
+  const { ctx, w, h } = setupCanvas('spread-chart');
+  const PAD = { top: 10, right: 20, bottom: 30, left: 50 };
+  const cw = w - PAD.left - PAD.right;
+  const ch = h - PAD.top - PAD.bottom;
+
+  ctx.clearRect(0, 0, w, h);
+
+  const minS = 0;
+  const maxS = Math.max(...spreads, 0.1);
+  const range = maxS - minS;
+  
+  const xOf = i => PAD.left + (i / (spreads.length - 1)) * cw;
+  const yOf = v => PAD.top + (1 - (v - minS) / range) * ch;
+
+  // RF threshold (5%)
+  const rfThreshold = 0.05;
+  
+  // Highlight zones where spread >= 5% (RF opportunities)
+  let inZone = false;
+  let zoneStart = 0;
+  
+  spreads.forEach((s, i) => {
+    if (s >= rfThreshold && !inZone) {
+      inZone = true;
+      zoneStart = i;
+    } else if (s < rfThreshold && inZone) {
+      inZone = false;
+      // Draw highlight zone
+      const x1 = xOf(zoneStart);
+      const x2 = xOf(i - 1);
+      ctx.fillStyle = 'rgba(74, 222, 128, 0.15)';
+      ctx.fillRect(x1, PAD.top, x2 - x1, ch);
+    }
+  });
+  
+  // Close zone if still open at end
+  if (inZone) {
+    const x1 = xOf(zoneStart);
+    const x2 = xOf(spreads.length - 1);
+    ctx.fillStyle = 'rgba(74, 222, 128, 0.15)';
+    ctx.fillRect(x1, PAD.top, x2 - x1, ch);
+  }
+
+  // Grid
+  ctx.strokeStyle = '#1e2230';
+  ctx.lineWidth = 1;
+  [0, 0.25, 0.5, 0.75, 1].forEach(v => {
+    const val = minS + v * range;
+    ctx.beginPath();
+    ctx.moveTo(PAD.left, yOf(val));
+    ctx.lineTo(PAD.left + cw, yOf(val));
+    ctx.stroke();
+    ctx.fillStyle = '#4b5563';
+    ctx.font = '10px JetBrains Mono';
+    ctx.fillText((val * 100).toFixed(0) + '%', 2, yOf(val) + 4);
+  });
+
+  // RF threshold line (5%)
+  ctx.strokeStyle = '#4ade80';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(PAD.left, yOf(rfThreshold));
+  ctx.lineTo(PAD.left + cw, yOf(rfThreshold));
+  ctx.stroke();
+  ctx.setLineDash([]);
+  
+  // RF label
+  ctx.fillStyle = '#4ade80';
+  ctx.font = '10px JetBrains Mono';
+  ctx.fillText('RF 5%', PAD.left + 5, yOf(rfThreshold) - 4);
+
+  // Spread line
+  ctx.beginPath();
+  ctx.strokeStyle = '#fbbf24';
+  ctx.lineWidth = 2;
+  spreads.forEach((s, i) => {
+    i === 0 ? ctx.moveTo(xOf(i), yOf(s)) : ctx.lineTo(xOf(i), yOf(s));
+  });
+  ctx.stroke();
+
+  // Mark points where spread >= 5%
+  spreads.forEach((s, i) => {
+    if (s >= rfThreshold) {
+      ctx.beginPath();
+      ctx.arc(xOf(i), yOf(s), 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#4ade80';
+      ctx.fill();
+      ctx.strokeStyle = '#0a0c10';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  });
+
+  // X axis
+  ctx.fillStyle = '#4b5563';
+  ctx.font = '10px JetBrains Mono';
+  const step = Math.floor(spreads.length / 6);
+  for (let i = 0; i < spreads.length; i += step) {
+    if (pricesGlobal[i]) {
+      const date = new Date(pricesGlobal[i].ts);
+      ctx.fillText(date.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}), xOf(i) - 20, h - 8);
+    }
+  }
+}
+
+function showTooltip(e, canvas, prices, entryPrice, xOf, yOf) {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const PAD_LEFT = 45;
+  const cw = rect.width - PAD_LEFT - 20;
+
+  let closest = 0;
+  let minDist = Infinity;
+  prices.forEach((_, i) => {
+    const x = PAD_LEFT + (i / (prices.length - 1)) * cw;
+    const d = Math.abs(x - mx);
+    if (d < minDist) { minDist = d; closest = i; }
+  });
+
+  const p = prices[closest];
+  const tt = document.getElementById('tooltip');
+  const date = new Date(p.ts);
+  
+  let ttContent = `
+    <div class="tt-row"><span>Outcome 1</span><span style="color:#38bdf8">${p.p1.toFixed(3)}</span></div>
+    <div class="tt-row"><span>Outcome 2</span><span style="color:#f472b6">${p.p2.toFixed(3)}</span></div>
+    <div class="tt-row"><span>Spread</span><span style="color:#fbbf24">${(Math.abs(p.p1 - p.p2) * 100).toFixed(1)}%</span></div>
+    <div class="tt-row"><span>Size 1</span><span>${p.size1.toFixed(1)}</span></div>
+    <div class="tt-row"><span>Size 2</span><span>${p.size2.toFixed(1)}</span></div>
+  `;
+  
+  if (p.clPrice) {
+    const clPrices = prices.map(p => p.clPrice).filter(c => c);
+    const minCL = Math.min(...clPrices);
+    const maxCL = Math.max(...clPrices);
+    const diff = p.clPrice - entryPrice;
+    const diffPct = entryPrice > 0 ? (diff / entryPrice * 100) : 0;
+    const direction = diff >= 0 ? '↑' : '↓';
+    const color = diff >= 0 ? '#4ade80' : '#ef4444';
+    
+    ttContent += `<div class="tt-row"><span>Chainlink</span><span style="color:#4ade80">$${p.clPrice.toFixed(0)}</span></div>`;
+    ttContent += `<div class="tt-row"><span>vs Entry</span><span style="color:${color}">${direction} ${Math.abs(diffPct).toFixed(1)}%</span></div>`;
+    if (p.binancePrice) {
+      ttContent += `<div class="tt-row"><span>Binance</span><span style="color:#f59e0b">$${p.binancePrice.toFixed(4)}</span></div>`;
+    }    
+  }
+  
+  // Bot position at this tick
+  const outcomeNames = Object.values(outcomeNamesGlobal);
+  const name1 = outcomeNames[0] || 'Outcome 1';
+  const name2 = outcomeNames[1] || 'Outcome 2';
+  
+  if (actionsGlobal.length > 0) {
+    const pos = calculatePositionAtTime(p.ts);
+    const totalInv = pos.totalInvested;
+    const hasAnyPosition = pos.outcome1.shares > 0 || pos.outcome2.shares > 0 || pos.realizedProceeds > 0;
+    
+    if (hasAnyPosition) {
+      const resolvePrice = 1.00;
+      
+      if (pos.hasSells) {
+        // After sells: show fixed realized PNL + remaining open position
+        const fixedPnl = pos.realizedProceeds - totalInv;
+        const fixedPct = totalInv > 0 ? (fixedPnl / totalInv) * 100 : 0;
+        const fixedColor = fixedPnl >= 0 ? '#4ade80' : '#f87171';
+        
+        ttContent += `<div class="tt-row" style="margin-top:8px;padding-top:8px;border-top:1px solid #1e2230"><span>💰 Реализовано (продано)</span></div>`;
+        ttContent += `<div class="tt-row"><span>Вложено всего</span><span>$${totalInv.toFixed(2)}</span></div>`;
+        ttContent += `<div class="tt-row"><span>Выручка от продаж</span><span style="color:#38bdf8">$${pos.realizedProceeds.toFixed(2)}</span></div>`;
+        ttContent += `<div class="tt-row"><span>Фикс. PNL</span><span style="color:${fixedColor};font-size:13px;font-weight:700">${fixedPnl >= 0 ? '+' : ''}$${fixedPnl.toFixed(2)} (${fixedPnl >= 0 ? '+' : ''}${fixedPct.toFixed(1)}%)</span></div>`;
+        
+        // Show remaining open positions
+        if (pos.outcome1.shares > 0 || pos.outcome2.shares > 0) {
+          ttContent += `<div class="tt-row" style="margin-top:6px;padding-top:6px;border-top:1px solid #1e2230"><span>📊 Остаток позиции</span></div>`;
+          if (pos.outcome1.shares > 0) {
+            const rem1Pnl = fixedPnl + resolvePrice * pos.outcome1.shares;
+            ttContent += `<div class="tt-row"><span>${name1} (${pos.outcome1.shares.toFixed(1)} шар)</span><span style="color:${rem1Pnl >= 0 ? '#4ade80' : '#f87171'}">${rem1Pnl >= 0 ? '+' : ''}$${rem1Pnl.toFixed(2)} если выиграет</span></div>`;
+          }
+          if (pos.outcome2.shares > 0) {
+            const rem2Pnl = fixedPnl + resolvePrice * pos.outcome2.shares;
+            ttContent += `<div class="tt-row"><span>${name2} (${pos.outcome2.shares.toFixed(1)} шар)</span><span style="color:${rem2Pnl >= 0 ? '#4ade80' : '#f87171'}">${rem2Pnl >= 0 ? '+' : ''}$${rem2Pnl.toFixed(2)} если выиграет</span></div>`;
+          }
+        }
+      } else {
+        // No sells yet: show standard hypothetical PNL if outcome resolves at $1
+        const pnlIf1Wins = (resolvePrice * pos.outcome1.shares) - totalInv;
+        const pnlIf2Wins = (resolvePrice * pos.outcome2.shares) - totalInv;
+        const pnl1Pct = totalInv > 0 ? (pnlIf1Wins / totalInv) * 100 : 0;
+        const pnl2Pct = totalInv > 0 ? (pnlIf2Wins / totalInv) * 100 : 0;
+        
+        ttContent += `<div class="tt-row" style="margin-top:8px;padding-top:8px;border-top:1px solid #1e2230"><span>📊 Позиция бота (→$1)</span></div>`;
+        ttContent += `<div class="tt-row"><span>${name1}</span><span>ср. ${pos.outcome1.avgPrice.toFixed(3)} | ${pos.outcome1.shares.toFixed(1)} шар</span></div>`;
+        ttContent += `<div class="tt-row"><span>${name1}→$1</span><span style="color:${pnlIf1Wins >= 0 ? '#4ade80' : '#f87171'}">$${pnlIf1Wins >= 0 ? '+' : ''}${pnlIf1Wins.toFixed(2)} (${pnlIf1Wins >= 0 ? '+' : ''}${pnl1Pct.toFixed(0)}%)</span></div>`;
+        ttContent += `<div class="tt-row"><span>${name2}</span><span>ср. ${pos.outcome2.avgPrice.toFixed(3)} | ${pos.outcome2.shares.toFixed(1)} шар</span></div>`;
+        ttContent += `<div class="tt-row"><span>${name2}→$1</span><span style="color:${pnlIf2Wins >= 0 ? '#4ade80' : '#f87171'}">$${pnlIf2Wins >= 0 ? '+' : ''}${pnlIf2Wins.toFixed(2)} (${pnlIf2Wins >= 0 ? '+' : ''}${pnl2Pct.toFixed(0)}%)</span></div>`;
+      }
+    }
+  }
+  
+  document.getElementById('tt-title').textContent = `Точка #${closest} | ${date.toLocaleTimeString()}`;
+  document.getElementById('tt-body').innerHTML = ttContent;
+  
+  // Check for nearby actions
+  if (actionsGlobal.length > 0) {
+    const firstTs = prices[0]?.ts;
+    const lastTs = prices[prices.length - 1]?.ts;
+    const timeRange = lastTs - firstTs;
+    if (firstTs && timeRange > 0) {
+      const canvas = document.getElementById('price-chart');
+      const rect = canvas.getBoundingClientRect();
+      const cw = rect.width - 65;
+      const mx = e.clientX - rect.left;
+      actionsGlobal.forEach(action => {
+        const actRelX = (action.ts - firstTs) / timeRange;
+        const actIdx = Math.round(actRelX * (prices.length - 1));
+        if (actIdx >= 0 && actIdx < prices.length) {
+          const actX = 45 + (actIdx / (prices.length - 1)) * cw;
+          const actDist = Math.abs(actX - mx);
+          if (actDist < 20) {
+            const isSell = action.side === 'SELL';
+            const actColor = action.type === 'ORDER_SENT'
+              ? (isSell ? '#fb923c' : '#fbbf24')
+              : (isSell ? '#ef4444' : '#a855f7');
+            const typeLabel = isSell
+              ? (action.type === 'ORDER_SENT' ? '🔴 SELL ORDER_SENT' : '💵 SELL MATCHED')
+              : (action.type === 'ORDER_SENT' ? '📤 ORDER_SENT' : '🎯 MATCHED');
+            ttContent += `<div class="tt-row" style="margin-top:8px;padding-top:8px;border-top:1px solid #1e2230"><span>Action</span><span style="color:${actColor}">${typeLabel}</span></div>`;
+            if (action.side) ttContent += `<div class="tt-row"><span>Side</span><span style="color:${isSell ? '#ef4444' : '#4ade80'}">${action.side}</span></div>`;
+            if (action.price) ttContent += `<div class="tt-row"><span>Price</span><span>${action.price}</span></div>`;
+            if (action.size) {
+              const proceeds = isSell && action.type === 'MATCHED' ? ` → $${(action.price * action.size).toFixed(2)}` : '';
+              ttContent += `<div class="tt-row"><span>Size</span><span>${action.size}${proceeds}</span></div>`;
+            }
+            if (action.outcome) ttContent += `<div class="tt-row"><span>Outcome</span><span>${action.outcome}</span></div>`;
+            if (action.reason) ttContent += `<div class="tt-row"><span>Reason</span><span>${action.reason}</span></div>`;
+            document.getElementById('tt-body').innerHTML = ttContent;
+          }
+        }
+      });
+    }
+  }
+  
+  tt.style.display = 'block';
+  const ttW = 280, ttH = 320;
+  let tx = e.clientX + 14, ty = e.clientY - 10;
+  if (tx + ttW > window.innerWidth) tx = e.clientX - ttW - 14;
+  if (ty + ttH > window.innerHeight) ty = window.innerHeight - ttH - 10;
+  tt.style.left = tx + 'px';
+  tt.style.top = ty + 'px';
+}
+</script>
+</body>
+</html>

@@ -16,17 +16,17 @@ export const CRYPTO_KEYWORDS = [
   'ethereum',
   'solana',
   'xrp',
-  '(AAPL)',
-  '(TSLA)',
-  '(GOOGL)',
-  '(NVDA)',
-  '(MSFT)',
-  '(AMZN)',
-  '(PLTR)',
-  'Microsoft'
+  // '(AAPL)',
+  // '(TSLA)',
+  // '(GOOGL)',
+  // '(NVDA)',
+  // '(MSFT)',
+  // '(AMZN)',
+  // '(PLTR)',
+  // 'Microsoft',
   // 'soccer', 
   // 'tennis',
-  // 'basketball'  
+  // 'basketball',  
   // 'temperature',
   // 'lol',
   // 'dota',
@@ -36,15 +36,30 @@ export const CRYPTO_KEYWORDS = [
   // 'valorant'
 ];
 
+export const SPORT_KEYWORDS = [
+  'soccer', 
+  'tennis',
+  'basketball',  
+  'temperature',
+  'lol',
+  'dota',
+  'honor',
+  'Counter-Strike',
+  'cs2',
+  'valorant'
+];
+
 export const ALLOWED_TAGS = [
   '1H',
   '15M',
   '5M',
   'soccer', 
-  // 'tennis',
-  'basketball'
-  // 'NBA',
-  // 'sports'
+  'tennis',
+  'basketball',
+  'esports',
+  'nba',
+  'sports',
+  'baseball'
 ];
 
 
@@ -96,7 +111,8 @@ export const STOP_TAGS = [
 ];
 
 export const STOP_WORDS = [
-  'flows'
+  'flows',
+  'above'
 ];
 
 const DISABLED_TIME_RANGES = [
@@ -145,6 +161,11 @@ export function nowTime() {
 export function isCryptoMarket(opp) {
   const text = `${opp.title} ${opp.tooltipTitle || ''}`.toLowerCase();
   return CRYPTO_KEYWORDS.some(keyword => text.includes(keyword));
+}
+
+export function isSportMarket(opp) {
+  const text = `${opp.title} ${opp.tooltipTitle || ''}`.toLowerCase();
+  return SPORT_KEYWORDS.some(keyword => text.includes(keyword));
 }
 
 export function formatMoscowDateTime(utcTime) {

@@ -1,5 +1,6 @@
 import { OrderType, Side } from "@polymarket/clob-client";
 import { arbitrageTestFlag, nowTime } from "./utils.js"; 
+import { getCachedOpportunities } from "./marketCache.js";
 // import { pushMarketLog } from './marketLogs.js';
 // import { nowTime } from "./utils.js"; 
 /**
@@ -59,10 +60,10 @@ export async function placeOrder(clobClient, orderParams) {
 }
 
 // SELL LIMIT
-export async function placeOrderSell(clobClient, orderParams){
+export async function placeOrderSell(clobClient, orderParams, maxAttempts = 3){
   try {
 
-    const { tokenID, size, side, price, orderPriceMinTickSize, negRisk, slug } = orderParams;
+    const { tokenID, size, side, price, orderPriceMinTickSize, negRisk, slug, opp_id } = orderParams;
     const marketOptions = { tickSize: orderPriceMinTickSize, negRisk: negRisk };
     // console.log(tokenID, size, side, price, orderPriceMinTickSize, negRisk);
     // console.log(tickSize: orderPriceMinTickSize, negRisk: negRisk);
@@ -74,16 +75,55 @@ export async function placeOrderSell(clobClient, orderParams){
     // };
     // let test_2 = marketOptions;
     // console.log(test_1, test_2);
-    const response = await clobClient.createAndPostOrder(
-      {
-        tokenID,
-        price,
-        size,
-        side: Side.SELL,
-      },
-      marketOptions, 
-      OrderType.GTC
-    );
+
+    let response;
+    if (arbitrageTestFlag) {
+      // Случайный успех ордера (true или false)
+      // 🎲 Рандомайзер: 85% успех, 15% провал
+      const isSuccess = Math.random() < 0.85; 
+
+      let cachedOpportunities = await getCachedOpportunities(); 
+      const freshOpp = cachedOpportunities.find(o => o.id === opp_id);
+      const freshOutcome = freshOpp.outcomes.find(o => o.assetId === tokenID);
+
+      // let isSuccess = false;
+      // if(freshOutcome.best_bid >= price){
+      //   isSuccess = true;
+      // } else {
+      //   isSuccess = false;
+      // }
+
+      let random_order_id = generateOrderId();
+
+      let info = {price: price, best_bid: freshOutcome.best_bid}
+      response = {
+        status: "fake",
+        success: isSuccess,
+        orderID: random_order_id,
+        takingAmount: '',
+        makingAmount: '',
+        errorMsg: "fake order sell",
+        info: info
+      }
+      await new Promise(res => setTimeout(res, 6000));
+      // <<-- тесты
+    } else {
+      const response = await clobClient.createAndPostOrder(
+        {
+          tokenID,
+          price,
+          size,
+          side: Side.SELL,
+        },
+        marketOptions, 
+        OrderType.GTC
+      );
+    }
+
+
+
+
+
 
     console.log(response);
     console.log(`✅ Order Sell response: ${response.status} | Slug: ${slug} | orderID: ${response.orderID}`);
@@ -91,6 +131,8 @@ export async function placeOrderSell(clobClient, orderParams){
     return response;
     
   } catch (error) {
+
+    
     console.error("❌ Error placing order:", error);
     throw error;
   }
@@ -289,9 +331,7 @@ export async function placeTestOrder(clobClient, orderParams, maxAttempts = 3) {
 
 export async function placeArbitrageOrder(clobClient, orderParams, maxAttempts = 3) {
 
-
-
-  const { tokenID, price, side, size, orderPriceMinTickSize, amount, order_type } = orderParams;
+  const { tokenID, price, side, size, orderPriceMinTickSize, amount, order_type, opp_id } = orderParams;
 
   let currentTickSize = String(orderPriceMinTickSize);
   let attempt = 0;
@@ -330,7 +370,20 @@ export async function placeArbitrageOrder(clobClient, orderParams, maxAttempts =
       if (arbitrageTestFlag) {
         // Случайный успех ордера (true или false)
         // const isSuccess = Math.random() > 0.5;
-        const isSuccess = true;
+        // console.log('opp_id: ', opp_id);
+        let cachedOpportunities = await getCachedOpportunities();
+        const freshOpp = cachedOpportunities.find(o => o.id === opp_id);
+        // console.log(freshOpp);
+        const freshOutcome = freshOpp.outcomes.find(o => o.assetId === tokenID);
+
+        let isSuccess = false;
+        if(price >= freshOutcome.best_ask){
+          isSuccess = true;
+        } else {
+          isSuccess = false;
+        }
+        // let info = `Order price:`, price, `Best ask: `, freshOutcome.best_ask}`}
+      let info = '';
         let random_order_id = generateOrderId();
         response = {
           status: "fake",
@@ -338,8 +391,10 @@ export async function placeArbitrageOrder(clobClient, orderParams, maxAttempts =
           orderID: random_order_id,
           takingAmount: '',
           makingAmount: '',
-          errorMsg: "fake order"
+          errorMsg: "fake order",
+          info: info
         }
+
         await new Promise(res => setTimeout(res, 6000));
         // <<-- тесты
       } else {

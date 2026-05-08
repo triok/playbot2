@@ -81,7 +81,7 @@ export function initPolymarketWS({ getCachedOpportunities, broadcast, changedOpp
       const { id, market, winning_outcome } = msg;
       const logText = `[${nowTime()}] resolved: "${winning_outcome}"`;
       pushMarketLog(id, logText); // market = marketId
-      // console.log(`MARKET RESOLVED ${id}, winning outcome: ${winning_outcome}`);
+      console.log(msg);
       pushTechnicalLog(market, `Resolved: "${winning_outcome}"`, 'polymarket_handler');
       broadcast({
         type: "market_resolved",

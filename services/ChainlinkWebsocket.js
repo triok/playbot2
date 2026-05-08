@@ -148,7 +148,7 @@ export class ChainlinkWebSocket {
     this.lastPrices.set(shortSymbol, price);
     
     // Обновляем в priceStore
-    updatePrice(shortSymbol, price);
+    updatePrice(shortSymbol, price, 'chainlink');
 
     // Отправляем на фронтенд
     this.broadcast({
