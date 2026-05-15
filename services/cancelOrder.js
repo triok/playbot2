@@ -1,4 +1,4 @@
-import { OrderType, Side } from "@polymarket/clob-client";
+import { OrderType, Side } from "@polymarket/clob-client-v2";
 import { arbitrageTestFlag } from "./utils.js"; 
 export async function waitForOrderMatch(client, orderID, timeoutMs) {
     const start = Date.now();

@@ -1,4 +1,4 @@
-import { AssetType } from "@polymarket/clob-client";
+import { AssetType } from "@polymarket/clob-client-v2";
 import { encodeFunctionData } from "viem";
 import { nowTime } from "./utils.js"; 
 

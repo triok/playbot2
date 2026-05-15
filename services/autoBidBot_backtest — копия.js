@@ -1558,36 +1558,6 @@ export function createAutoBidBot({ onSignal, client, placeArbitrageOrder, placeO
 
           if (arbitrageTestFlag) {
             // -- > тест
-            function calculateInitialValue(orders, { type, assetId, fallbackSize }) {
-              return orders
-                .filter(o =>
-                  o.type === type &&
-                  o.status === "MATCHED" &&
-                  o.assetId === assetId
-                )
-                .reduce((sum, o) => {
-                  const size = o.size ?? fallbackSize ?? 0;
-                  return sum + (Number(o.price) * Number(size));
-                }, 0);
-            }
-            const entryInitialValue = calculateInitialValue(state.orders, {
-              type: "initial",
-              assetId: state.position.entry.assetId,
-              fallbackSize: state.position.entry.size
-            });
-            
-            const hedgeInitialValue = calculateInitialValue(state.orders, {
-              type: "hedge50",
-              assetId: state.position.hedge.assetId
-            });
-            
-            const hedgeSize = state.orders
-            .filter(o =>
-              o.type === "hedge50" &&
-              o.status === "MATCHED" &&
-              o.assetId === state.position.hedge.assetId
-            )
-            .reduce((sum, o) => sum + Number(o.size || 0), 0);
 
             positions = [
               {

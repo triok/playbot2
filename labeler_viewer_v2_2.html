@@ -1150,7 +1150,7 @@ function showTooltip(e, canvas, prices, entryPrice, xOf, yOf) {
     const direction = diff >= 0 ? '↑' : '↓';
     const color = diff >= 0 ? '#4ade80' : '#ef4444';
     
-    ttContent += `<div class="tt-row"><span>Chainlink</span><span style="color:#4ade80">$${p.clPrice.toFixed(0)}</span></div>`;
+    ttContent += `<div class="tt-row"><span>Chainlink</span><span style="color:#4ade80">$${p.clPrice.toFixed(2)}</span></div>`;
     ttContent += `<div class="tt-row"><span>vs Entry</span><span style="color:${color}">${direction} ${Math.abs(diffPct).toFixed(1)}%</span></div>`;
     if (p.binancePrice) {
       ttContent += `<div class="tt-row"><span>Binance</span><span style="color:#f59e0b">$${p.binancePrice.toFixed(4)}</span></div>`;

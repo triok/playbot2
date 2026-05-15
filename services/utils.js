@@ -57,7 +57,7 @@ export const ALLOWED_TAGS = [
   'tennis',
   'basketball',
   'esports',
-  'nba',
+  'NBA',
   'sports',
   'baseball'
 ];
@@ -84,11 +84,25 @@ const KEYWORD_TO_SYMBOL = {
 // };
 
 export const priceThresholds = {
-  BTC: 41,
-  // ETH: 0.82,
-  ETH: 0.55,
+  // BTC: 41,
+  // ETH: 0.55,
+  // SOL: 0.01,
+  // XRP: 0.0020
+  BTC: 9,
+  ETH: 0.74,
   SOL: 0.01,
-  XRP: 0.0020
+  XRP: 0.0025  
+};
+
+export const priceThresholds1h = {
+  // BTC: 41,
+  // ETH: 0.55,
+  // SOL: 0.01,
+  // XRP: 0.0020
+  BTC: 60,
+  ETH: 0.90,
+  SOL: 0.13,
+  XRP: 0.0037  
 };
 
 export const priceThresholds5m = {

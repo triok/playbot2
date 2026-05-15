@@ -59,7 +59,7 @@ export async function getOpportunities() {
   const opportunities = [];
 
   for (const event of allEvents) {
-    console.log(event.slug);
+
     if (!event.markets || event.ended) continue;
 
     for (const market of event.markets) {
@@ -84,7 +84,7 @@ export async function getOpportunities() {
       const isLiveNow      = event.live === true;
       const isEndingSoon   = endDate <= future;
       const eventTagSlugs  = event.tags?.map(t => t.slug) || [];
-console.log(event.title, eventTagSlugs);
+
       // Стоп-теги и стоп-слова (глобально для всех сценариев)
       if (STOP_TAGS.some(s => eventTagSlugs.includes(s))) continue;
       if (containsStopWord(event.title, STOP_WORDS)) continue;

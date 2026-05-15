@@ -1,4 +1,4 @@
-import { AssetType } from "@polymarket/clob-client";
+import { AssetType } from "@polymarket/clob-client-v2";
 
 export async function checkBalance(clobClient) {
   const collateral = await clobClient.getBalanceAllowance({ asset_type: AssetType.COLLATERAL });

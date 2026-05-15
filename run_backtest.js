@@ -23,13 +23,13 @@ const cleanMemory = () => {
 // const LOGS_DIR = './data/tests2';
 // const LOGS_DIR = './data/test_real';  
 // const LOGS_DIR = './data/tests_sol'; 
-// const LOGS_DIR = './data/test_one';  
-const LOGS_DIR = './data/market_price_new_chainlink_binance' ;
+const LOGS_DIR = './data/test_one';
+// const LOGS_DIR = './data/market_price_new_chainlink_binance' ;
 // const LOGS_DIR = './data/tests_highinitial';
-// const LOGS_DIR = './data/market_prices';
+// const LOGS_DIR = './data/market_prices_11h';
 // const LOGS_DIR = './data/market_prices_new_with_chainlink';
 const TEST_MARKET_ID = '0x8bb9e49611afc7814aeea5e4462b72451e929765d757b59c05ede6fe4647aaf6'; 
-const MAX_MARKETS = 407;
+const MAX_MARKETS = 2307;
 
 const TRAINING_WITH_ACTIONS_DIR = './data/training_data_with_actions';
 let currentMarketLog = [];
@@ -66,10 +66,11 @@ const ticksCache = {};
 const marketInfoCache = {};
 
 const LATENCY_SEND_MS      = 1_000;  // расчёт → отправка
-const LATENCY_VISIBLE_MS   = 1_000;  // отправка → появление на бирже
+const LATENCY_VISIBLE_MS   = 2_000;  // отправка → появление на бирже
 const LATENCY_MATCH_MS     = 1_000;  // появление → матч
 const LATENCY_POSITIONS_MS = 11_000;  // матч → позиции обновились
-const API_LATENCY_MS       = 11_000; // 11 секунд задержки
+// const API_LATENCY_MS       = 11_000; // 11 секунд задержки
+const API_LATENCY_MS       = 1_000;
 const LATENCY_CANCEL_NOTIFY_MS = 11_000;
 
 let backtestReport = {
@@ -81,17 +82,40 @@ let backtestReport = {
 // ========================================================
 // 1. СИНХРОНИЗАЦИЯ С БОТОМ
 // ========================================================
-function syncOrderStatusWithBot(orderId, status, marketId, price = null) {
+function syncOrderStatusWithBot(orderId, status, marketId, price = null, actualSize = null, fee = null) {
     const state = testBot.getBotState(marketId);
     if (state && state.orders) {
       const botOrder = state.orders.find(o => o.orderId === orderId);
       if (botOrder) {
         botOrder.status = status;
+        
         if (price) botOrder.price = price;
+        if (actualSize) botOrder.size = actualSize;
+        
+        // Записываем комиссию прямо в стейт бота
+        if (fee !== null) {
+           botOrder.fee = fee;
+           if (botOrder.side === 'BUY') {
+               botOrder.costUsdc = actualSize * price;
+               botOrder.totalCostWithFee = botOrder.costUsdc + fee;
+           }
+        }
+        
         if (status === "MATCHED") botOrder.matchedTime = global.VIRTUAL_TIME;
       }
     }
-  }
+}  
+// function syncOrderStatusWithBot(orderId, status, marketId, price = null) {
+//     const state = testBot.getBotState(marketId);
+//     if (state && state.orders) {
+//       const botOrder = state.orders.find(o => o.orderId === orderId);
+//       if (botOrder) {
+//         botOrder.status = status;
+//         if (price) botOrder.price = price;
+//         if (status === "MATCHED") botOrder.matchedTime = global.VIRTUAL_TIME;
+//       }
+//     }
+//   }
 
 // ========================================================
 // 2. ФЕЙКОВАЯ БИРЖА (MOCK EXCHANGE)
@@ -126,7 +150,18 @@ const mockPlaceArbitrageOrder = async (params) => {
     reason: params.reason || ''
   });
 
-  return { success: true, orderID: orderId };
+  // Если GTC - ложится в стакан ("live"). Если FOK/FAK - встает в очередь ("delayed")
+  const apiStatus = params.order_type === 'GTC' ? "live" : "delayed";
+
+  return { 
+    success: true, 
+    orderID: orderId,
+    status: apiStatus,
+    takingAmount: '', // Пока пусто, ордер еще летит по сети
+    makingAmount: '',
+    feePaid: 0        // Комиссия пока 0, спишется при мэтчинге
+  };
+  // return { success: true, orderID: orderId };
 };
 const mockCancelOrderFn = async (arg1, arg2) => {
     const orderId = typeof arg1 === 'string' ? arg1 : arg2;
@@ -146,61 +181,51 @@ const mockGetOrderFn = async (arg1, arg2) => {
   const order = mockOrders[orderId] || {};
   return { status: order.status, size_matched: order.matchedSize, price: order.price };
 };
-// const mockGetUserPositionsFn = async (currentOutcomes = []) => {
-//     if (!Array.isArray(currentOutcomes)) currentOutcomes = [];
-//     const positions = {};
-//     for (const order of Object.values(mockOrders)) {
-//       if (order.status === "MATCHED") {
-//         if (!positions[order.assetId]) positions[order.assetId] = { size: 0, initialValue: 0 };
-//         positions[order.assetId].size += order.matchedSize;
-//         positions[order.assetId].initialValue += (order.matchedSize * order.price);
-//       }
-//     }
-  
-//     // ← Считаем общую сумму вложений по ВСЕМ позициям
-//     const totalInvestedAll = Object.values(positions).reduce((sum, p) => sum + p.initialValue, 0);
-  
-//     return Object.keys(positions).map(assetId => {
-//       const pos = positions[assetId];
-//       const found = currentOutcomes.find(o => o.assetId === assetId);
-//       const currentPrice = found?.best_ask || found?.price || 0;
-//       const currentValue = pos.size * currentPrice;
-      
-//       // PnL если этот исход победит — минус ВСЕ вложения
-//       const pnlIfWin = pos.size - totalInvestedAll;
-//       const pnlIfWinPct = totalInvestedAll > 0 ? (pnlIfWin / totalInvestedAll * 100) : 0;
-      
-//       return {
-//         asset: assetId,
-//         size: pos.size,
-//         initialValue: pos.initialValue,
-//         totalInvestedAll,
-//         currentValue,
-//         pnlIfWin,
-//         pnlIfWinPct,
-//         outcome: outcomeNames[assetId] || "Unknown"
-//       };
-//     });
-//   };
+
 const mockGetUserPositionsFn = async (currentOutcomes = []) => {
     if (!Array.isArray(currentOutcomes)) currentOutcomes = [];
     const positions = {};
     
-    for (const order of Object.values(mockOrders)) {
-      // 🚨 МАГИЯ ЗАДЕРЖКИ: Учитываем ордер только если он MATCHED и прошло время LATENCY
-      // Предполагаем, что processMockMatching записывает время матчинга в order.matchedTime
+    // Сортируем ордера по времени, чтобы SELL применялись СТРОГО ПОСЛЕ BUY
+    const sortedOrders = Object.values(mockOrders).sort((a, b) => a.matchedTime - b.matchedTime);
+
+    for (const order of sortedOrders) {
       if (order.status === "MATCHED" && order.matchedTime) {
         
         const timeSinceMatch = global.VIRTUAL_TIME - order.matchedTime;
         
         if (timeSinceMatch >= API_LATENCY_MS) {
           if (!positions[order.assetId]) positions[order.assetId] = { size: 0, initialValue: 0 };
-          positions[order.assetId].size += order.matchedSize;
-          positions[order.assetId].initialValue += (order.matchedSize * order.price);
+          
+          const p = positions[order.assetId];
+
+          // ==========================================
+          // РАЗДЕЛЯЕМ ЛОГИКУ ДЛЯ BUY И SELL
+          // ==========================================
+          if (order.side === 'BUY') {
+              p.size += order.matchedSize;
+              // Прибавляем стоимость акций + КОМИССИЮ
+              p.initialValue += (order.matchedSize * order.price) + (order.feePaid || 0);
+          } 
+          else if (order.side === 'SELL') {
+              const oldSize = p.size;
+              
+              // Вычитаем проданные акции
+              p.size = Math.max(0, oldSize - order.matchedSize);
+              
+              // Пропорционально списываем затраты, чтобы средняя цена (avgPrice) не изменилась
+              if (oldSize > 0) {
+                  const percentSold = order.matchedSize / oldSize;
+                  p.initialValue = Math.max(0, p.initialValue - (p.initialValue * percentSold));
+              } else {
+                  p.initialValue = 0;
+              }
+          }
         }
       }
     }
   
+    // Считаем общие инвестиции по всем текущим позициям
     const totalInvestedAll = Object.values(positions).reduce((sum, p) => sum + p.initialValue, 0);
   
     return Object.keys(positions).map(assetId => {
@@ -223,7 +248,49 @@ const mockGetUserPositionsFn = async (currentOutcomes = []) => {
         outcome: outcomeNames[assetId] || "Unknown"
       };
     });
-  };
+};
+// const mockGetUserPositionsFn = async (currentOutcomes = []) => {
+//     if (!Array.isArray(currentOutcomes)) currentOutcomes = [];
+//     const positions = {};
+    
+//     for (const order of Object.values(mockOrders)) {
+//       // 🚨 МАГИЯ ЗАДЕРЖКИ: Учитываем ордер только если он MATCHED и прошло время LATENCY
+//       // Предполагаем, что processMockMatching записывает время матчинга в order.matchedTime
+//       if (order.status === "MATCHED" && order.matchedTime) {
+        
+//         const timeSinceMatch = global.VIRTUAL_TIME - order.matchedTime;
+        
+//         if (timeSinceMatch >= API_LATENCY_MS) {
+//           if (!positions[order.assetId]) positions[order.assetId] = { size: 0, initialValue: 0 };
+//           positions[order.assetId].size += order.matchedSize;
+//           positions[order.assetId].initialValue += (order.matchedSize * order.price);
+//         }
+//       }
+//     }
+  
+//     const totalInvestedAll = Object.values(positions).reduce((sum, p) => sum + p.initialValue, 0);
+  
+//     return Object.keys(positions).map(assetId => {
+//       const pos = positions[assetId];
+//       const found = currentOutcomes.find(o => o.assetId === assetId);
+//       const currentPrice = found?.best_ask || found?.price || 0;
+//       const currentValue = pos.size * currentPrice;
+      
+//       const pnlIfWin = pos.size - totalInvestedAll;
+//       const pnlIfWinPct = totalInvestedAll > 0 ? (pnlIfWin / totalInvestedAll * 100) : 0;
+      
+//       return {
+//         asset: assetId,
+//         size: pos.size,
+//         initialValue: pos.initialValue,
+//         totalInvestedAll,
+//         currentValue,
+//         pnlIfWin,
+//         pnlIfWinPct,
+//         outcome: outcomeNames[assetId] || "Unknown"
+//       };
+//     });
+//   };
 // ========================================================
 // 3. ДВИЖОК МЭТЧИНГА (MATCHING ENGINE)
 // ========================================================
@@ -332,38 +399,82 @@ function processMockMatching(tickOutcomes, marketId) {
       // const isPriceOk = order.price >= marketData.best_ask;
       // const isSizeOk = marketData.size >= order.size;
 
-      if (isPriceOk) {
-        const fillSize = order.size; // исполнение полное
+      // if (isPriceOk) {
+      //   const fillSize = order.size; // исполнение полное
   
+      //   if (fillSize > 0) {
+      //     currentMarketLog.push({
+      //       ts: global.VIRTUAL_TIME,
+      //       type: "MATCHED",
+      //       side: order.side, // Записываем тип ордера
+      //       price: executionPrice,
+      //       size: order.size,
+      //       outcome: outcomeNames[order.assetId]
+      //     });
+
+      //     order.status = "MATCHED";
+      //     order.matchedSize = fillSize; 
+      //     order.price = executionPrice; // Реальная цена исполнения
+      //     order.matchedTime = global.VIRTUAL_TIME;
+      
+      //     const outName = outcomeNames[order.assetId] || 'Unknown';
+      //     // matchLog = `💰 ОРДЕР ${order.side} ИСПОЛНЕН: ${fillSize} "${outName}" по $${executionPrice}`;
+      //   // console.log(matchLog);
+      //     syncOrderStatusWithBot(order.id, "MATCHED", marketId, executionPrice);
+      //     printStatusTable(marketId);
+      
+      //   } else if (order.order_type === 'FAK' && order.side === 'BUY') {
+      //     // FAK отклоняется только если стакан пуст и это BUY ордер
+      //     markOrderAsRejected(order);
+      //   }
+
+
+  
+      // } else {
+      if (isPriceOk) {
+        
+        // 1. ПЕРЕСЧЕТ РАЗМЕРА (Улучшение цены для BUY)
+        let fillSize = order.size; 
+        
+        if (order.side === 'BUY' && (order.order_type === 'FOK' || order.order_type === 'FAK')) {
+            // Вычисляем, сколько баксов бот планировал потратить
+            const intendedBudget = order.size * order.price;
+            // Покупаем на эти баксы по реальной, лучшей цене рынка
+            fillSize = intendedBudget / executionPrice;      
+        }
+
+        // 2. РАСЧЕТ КОМИССИИ (Только для Taker-сделок, которые исполнились мгновенно)
+        const FEE_RATE = 0.07;
+        let rawFee = fillSize * FEE_RATE * executionPrice * (1 - executionPrice);
+        let fee = Number(rawFee.toFixed(5));
+        if (fee < 0.00001) fee = 0;
+
         if (fillSize > 0) {
           currentMarketLog.push({
             ts: global.VIRTUAL_TIME,
             type: "MATCHED",
-            side: order.side, // Записываем тип ордера
+            side: order.side, 
             price: executionPrice,
-            size: order.size,
+            size: fillSize, // Пишем РЕАЛЬНЫЙ размер
+            fee: fee,       // Пишем комиссию
             outcome: outcomeNames[order.assetId]
           });
 
           order.status = "MATCHED";
           order.matchedSize = fillSize; 
-          order.price = executionPrice; // Реальная цена исполнения
+          order.price = executionPrice; 
+          order.feePaid = fee; // Сохраняем комиссию в виртуальный ордер
           order.matchedTime = global.VIRTUAL_TIME;
       
-          const outName = outcomeNames[order.assetId] || 'Unknown';
-          // matchLog = `💰 ОРДЕР ${order.side} ИСПОЛНЕН: ${fillSize} "${outName}" по $${executionPrice}`;
-        // console.log(matchLog);
-          syncOrderStatusWithBot(order.id, "MATCHED", marketId, executionPrice);
+          // 3. ПЕРЕДАЕМ В БОТА ВСЕ НОВЫЕ ДАННЫЕ (Цену, Размер, Комиссию)
+          syncOrderStatusWithBot(order.id, "MATCHED", marketId, executionPrice, fillSize, fee);
           printStatusTable(marketId);
       
         } else if (order.order_type === 'FAK' && order.side === 'BUY') {
-          // FAK отклоняется только если стакан пуст и это BUY ордер
           markOrderAsRejected(order);
         }
 
-
-  
-      } else {
+      } else {      
         // ✅ Помечаем ордер как отклоненный (не подошла цена/размер)
         // ========================================================
         // 4. ЛОГИКА ОТМЕНЫ (Только для BUY ордеров)
@@ -552,7 +663,7 @@ async function runSingleBacktestOdin(marketId, realClient, botInstance) {
       // console.log(maxFrozenMs);
       if (maxFrozenMs >= 80_000) {
         console.log(`🗑️  [${marketId}] Chainlink завис на ${Math.round(maxFrozenMs / 1000)}s — удаляем файл`);
-        // fs.unlinkSync(path.join(LOGS_DIR, `${marketId}.jsonl`));
+        fs.unlinkSync(path.join(LOGS_DIR, `${marketId}.jsonl`));
         return null;
       }
 
@@ -955,7 +1066,7 @@ if(test_type == '1 progon'){
     
       for (let i = 0; i < files.length; i++) {
         const marketId = files[i].replace('.jsonl', '');
-        console.log(`\n💎 Обработка маркета #${i+1}: ${marketId}`);
+        // console.log(`\n💎 Обработка маркета #${i+1}: ${marketId}`);
 
           // ✅ СОЗДАЕМ бота ЗАНОВО для каждого рынка
           // OPTIMIZED CONFIG v20: Back to best v15 + tighter rescue
@@ -992,7 +1103,7 @@ if(test_type == '1 progon'){
             PHASE_ENDGAME_START_SEC_1H: 540,
             GLOBAL_MAX_MARKET_BUDGET: 155,
             GLOBAL_MIN_ORDER_AMOUNT: 1.10,
-            GLOBAL_RF_MIN_PROFIT_PCT: 0.09,
+            GLOBAL_RF_MIN_PROFIT_PCT: 0.05,
             GLOBAL_MAX_WINNER_PCT: 0.55,
             START_AVG_TARGET_DROP: 0.015,
             START_PIVOT_PRICE_MIN: 0.51,
@@ -1000,7 +1111,7 @@ if(test_type == '1 progon'){
             MID_PIVOT_TARGET_PROFIT: 0.85,
             MID_TREND_PRICE_MAX: 0.62,  
             ENDGAME_BREAKOUT_TARGET: 0.96, 
-            MID_TREND_BUY_AMOUNT: 1.15             
+            MID_TREND_BUY_AMOUNT: 1.15                
           };
 
         const currentBot = createAutoBidBot({
@@ -1075,6 +1186,42 @@ if(test_type == '1 progon'){
       console.log(`================================================================================\n`);
       // -------------------------
 
+
+      // ─── НОВЫЙ БЛОК СТАТИСТИКИ ПО МОНЕТАМ ──────────────────────────────
+      const coinStats = {};
+
+      // Собираем данные
+      for (const market of frontendData.markets) {
+        // Если монета почему-то не указана, запишем в 'Unknown'
+        const coinName = market.coin ? market.coin.toUpperCase() : 'UNKNOWN'; 
+        
+        if (!coinStats[coinName]) {
+          coinStats[coinName] = { wins: 0, losses: 0 };
+        }
+
+        if (market.pnl > 0) {
+          coinStats[coinName].wins++;
+        } else {
+          coinStats[coinName].losses++;
+        }
+      }
+
+      console.log(`📊 СТАТИСТИКА ПО КРИПТОВАЛЮТАМ:`);
+      
+      // Выводим данные по каждой монете
+      for (const [coin, stats] of Object.entries(coinStats)) {
+        const total = stats.wins + stats.losses;
+        const coinWinRate = total > 0 ? (stats.wins / total * 100).toFixed(2) : 0;
+        
+        console.log(`🪙 ${coin}:`);
+        console.log(`   Выигрышей:     ${stats.wins}`);
+        console.log(`   Проигрышей:    ${stats.losses}`);
+        console.log(`   Процент побед: ${coinWinRate}%`);
+        console.log(`   ----------------------------------`);
+      }
+      console.log(`================================================================================\n`);
+      // ───────────────────────────────────────────────────────────────────
+
       // ─── CSV ЭКСПОРТ ───────────────────────────────────────────────────
       const csvRows = [];
 
@@ -1140,6 +1287,7 @@ if(test_type == '1 progon'){
         running += market.pnl;
         cumulativePnl.push({
           marketId: market.marketId ?? 'unknown',
+          coin: market.coin ?? 'unknown',
           pnl: parseFloat(market.pnl.toFixed(2)),
           cumulative: parseFloat(running.toFixed(2)),
           result: market.pnl >= 0 ? 'WIN' : 'LOSS'
@@ -1212,7 +1360,7 @@ if(test_type == '1 progon'){
         <h2 style="margin: 30px 0 16px">🔴 Worst Losses</h2>
         <table>
           <thead>
-            <tr><th>#</th><th>Market ID</th><th>Result</th><th>PnL ($)</th><th>PnL (%)</th><th>Invested ($)</th></tr>
+            <tr><th>#</th><th>Coin</th><th>Market ID</th><th>Result</th><th>PnL ($)</th><th>PnL (%)</th><th>Invested ($)</th></tr>
           </thead>
           <tbody>
             ${cumulativePnl
@@ -1228,6 +1376,7 @@ if(test_type == '1 progon'){
               .slice(0, 30)
               .map(m => `<tr>
                 <td>${m.idx}</td>
+                <td style="color:#63b3ed;font-weight:bold">${(m.coin || 'unknown').toUpperCase()}</td>
                 <td style="font-family:monospace;font-size:11px">${m.marketId}</td>
                 <td class="${m.result === 'WIN' ? 'win' : 'loss'}">${m.result}</td>
                 <td class="loss">${m.pnl >= 0 ? '+' : ''}$${m.pnl}</td>
@@ -1240,7 +1389,7 @@ if(test_type == '1 progon'){
         <h2 style="margin: 30px 0 16px">🟢 Top Winners</h2>
         <table>
           <thead>
-            <tr><th>#</th><th>Market ID</th><th>Result</th><th>PnL ($)</th><th>PnL (%)</th><th>Invested ($)</th></tr>
+            <tr><th>#</th><th>Coin</th><th>Market ID</th><th>Result</th><th>PnL ($)</th><th>PnL (%)</th><th>Invested ($)</th></tr>
           </thead>
           <tbody>
             ${cumulativePnl
@@ -1256,6 +1405,7 @@ if(test_type == '1 progon'){
               .slice(0, 30)
               .map(m => `<tr>
                 <td>${m.idx}</td>
+                <td style="color:#63b3ed;font-weight:bold">${(m.coin || 'unknown').toUpperCase()}</td>
                 <td style="font-family:monospace;font-size:11px">${m.marketId}</td>
                 <td class="${m.result === 'WIN' ? 'win' : 'loss'}">${m.result}</td>
                 <td class="win">+$${m.pnl}</td>

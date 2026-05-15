@@ -1,5 +1,5 @@
 import { waitForOrderMatch } from "./cancelOrder.js";
-import { OrderType } from "@polymarket/clob-client";
+import { OrderType } from "@polymarket/clob-client-v2";
 import { pushMarketLog } from './marketLogs.js';
 import { nowTime } from "./utils.js"; 
 

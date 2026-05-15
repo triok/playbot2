@@ -1,5 +1,5 @@
 // getTradeHistory.js
-import { Side } from "@polymarket/clob-client";
+import { Side } from "@polymarket/clob-client-v2";
 
 /**
  * Получает историю сделок пользователя через CLOB Client
